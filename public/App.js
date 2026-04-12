@@ -1,6 +1,7 @@
 /* ============================================================
-   CrowdSense Dashboard — App.js
-   Wires up all backend endpoints and manages the dashboard UI.
+   KIU CrowdSense Dashboard — App.js
+   People Detection & Counting System using YOLOv8 + ByteTrack
+   FYP — BSc Computer Science, Kampala International University
    ============================================================ */
 
 'use strict';
@@ -9,18 +10,14 @@
 const PYTHON_API = 'http://localhost:8000';
 const REFRESH_INTERVAL = 5000; // ms
 
-const SHOP_NAMES = {
-  '18.5204,73.8567': 'Zudio',
-  '18.5250,73.8567': 'Phoenix Mall',
-  '18.5369,73.8567': 'Kaka Halwai',
-  '18.5650,73.8567': 'Shaniwar Peth',
-  '18.5850,73.8567': 'Starbucks',
+// KIU campus camera zones
+const CAMERA_COORDS = {
+  'kiu-main-entrance': { lat: 0.2858, lng: 32.5734, label: 'Main Entrance' },
+  'kiu-library':       { lat: 0.2861, lng: 32.5738, label: 'Library' },
 };
 
-function shopName(lat, lng) {
-  const key4 = `${parseFloat(lat).toFixed(4)},${parseFloat(lng).toFixed(4)}`;
-  const key  = `${lat},${lng}`;
-  return SHOP_NAMES[key4] || SHOP_NAMES[key] || `${lat}, ${lng}`;
+function cameraLabel(id) {
+  return (CAMERA_COORDS[id] || {}).label || id;
 }
 
 // ── Chart.js defaults ────────────────────────────────────────
@@ -77,11 +74,11 @@ const SECTION_TITLES = {
   'overview':       'Overview',
   'live-detection': 'Live Detection',
   'live-map':       'Live Map',
-  'shops':          'Shops',
-  'analytics':      'Trends & Charts',
-  'top-shops':      'Top Locations',
-  'heatmap':        'Heatmap Data',
-  'history':        'History',
+  'shops':          'Cameras',
+  'analytics':      'Detection Analytics',
+  'top-shops':      'Zone Rankings',
+  'heatmap':        'Occupancy',
+  'history':        'Sessions',
   'health':         'System Health',
 };
 
@@ -103,6 +100,7 @@ function navigate(section) {
   if (section === 'heatmap')        loadHeatmap();
   if (section === 'health')         loadHealth();
   if (section === 'live-detection') loadDetectionData();
+  if (section === 'history')        loadHistory();
 }
 
 function toggleSidebar() {
@@ -129,36 +127,37 @@ let recentData = [];
 let leafletMap, mapMarkers = {}, mapCircles = {};
 
 function initCharts() {
-  ovPeakChart     = makeChart('ovPeakChart',     [lineDataset('Peak', '#4f8ef7')]);
-  ovAvgChart      = makeChart('ovAvgChart',      [lineDataset('Avg',  '#22c55e')]);
-  ovForecastChart = makeChart('ovForecastChart', [lineDataset('Forecast', '#f59e0b')]);
-  anPeakChart     = makeChart('anPeakChart',     [lineDataset('Peak', '#4f8ef7')]);
-  anAvgChart      = makeChart('anAvgChart',      [lineDataset('Avg',  '#22c55e')]);
-  anForecastChart = makeChart('anForecastChart', [lineDataset('Forecast', '#f59e0b')]);
+  ovPeakChart     = makeChart('ovPeakChart',     [lineDataset('Total IN',    '#4f8ef7')]);
+  ovAvgChart      = makeChart('ovAvgChart',      [lineDataset('Total OUT',   '#22c55e')]);
+  ovForecastChart = makeChart('ovForecastChart', [lineDataset('Net Occupancy', '#f59e0b')]);
+  anPeakChart     = makeChart('anPeakChart',     [lineDataset('Total IN',    '#4f8ef7')]);
+  anAvgChart      = makeChart('anAvgChart',      [lineDataset('Net Occupancy', '#22c55e')]);
+  anForecastChart = makeChart('anForecastChart', [lineDataset('Current Count', '#f59e0b')]);
 }
 
 function initMap() {
-  leafletMap = L.map('map').setView([18.5204, 73.8567], 13);
+  // Centre on KIU campus, Kampala
+  leafletMap = L.map('map').setView([0.2858, 32.5734], 17);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
   }).addTo(leafletMap);
 }
 
 function crowdColor(count) {
-  if (count >= 6) return '#ef4444';
-  if (count >= 3) return '#f59e0b';
+  if (count >= 16) return '#ef4444';
+  if (count >= 6)  return '#f59e0b';
   return '#22c55e';
 }
 
 function crowdBadgeClass(count) {
-  if (count >= 6) return 'red';
-  if (count >= 3) return 'amber';
+  if (count >= 16) return 'red';
+  if (count >= 6)  return 'amber';
   return 'green';
 }
 
 function crowdLabel(count) {
-  if (count >= 6) return 'High';
-  if (count >= 3) return 'Moderate';
+  if (count >= 16) return 'High';
+  if (count >= 6)  return 'Moderate';
   return 'Low';
 }
 
@@ -171,27 +170,28 @@ function createDivIcon(color) {
   });
 }
 
-function updateMapMarkers(items) {
-  // Remove stale circles
+function updateMapMarkers(cameras) {
   Object.values(mapCircles).forEach(cs => cs.forEach(c => leafletMap.removeLayer(c)));
   mapCircles = {};
 
-  items.forEach(item => {
-    const lat = item.coordinates.latitude;
-    const lng = item.coordinates.longitude;
-    const key = `${lat.toFixed(4)},${lng.toFixed(4)}`;
-    const name = shopName(lat, lng);
-    const color = crowdColor(item.count);
-    const badgeCls = crowdBadgeClass(item.count);
-    const lbl = crowdLabel(item.count);
+  cameras.forEach(cam => {
+    const info = CAMERA_COORDS[cam.camera_id] || {};
+    const lat  = info.lat || 0;
+    const lng  = info.lng || 0;
+    const key  = cam.camera_id;
+    const name = info.label || cam.camera_id;
+    const count = cam.current_count || 0;
+    const color = crowdColor(count);
+    const lbl   = crowdLabel(count);
 
     const popup = `
-      <div style="min-width:140px">
+      <div style="min-width:150px">
         <strong>${name}</strong><br/>
-        Crowd: <b>${item.count}</b>
+        Current: <b>${count}</b>
         <span style="margin-left:6px;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;
           background:${color}22;color:${color}">${lbl}</span><br/>
-        <span style="font-size:11px;color:#94a3b8">${lat}, ${lng}</span>
+        IN: ${cam.count_in || 0} &nbsp; OUT: ${cam.count_out || 0}<br/>
+        <span style="font-size:11px;color:#94a3b8">FPS: ${(cam.fps || 0).toFixed(1)}</span>
       </div>`;
 
     if (!mapMarkers[key]) {
@@ -203,62 +203,63 @@ function updateMapMarkers(items) {
       mapMarkers[key].setPopupContent(popup);
     }
 
-    const radius = Math.max(40, item.count * 12);
+    const radius = Math.max(40, count * 12);
     mapCircles[key] = [
       L.circle([lat, lng], { color, fillColor: color, fillOpacity: 0.18, radius, stroke: false }).addTo(leafletMap),
     ];
   });
 }
 
-// ── Main data fetch (crowd data) ─────────────────────────────
+// ── Main data fetch (detection API) ─────────────────────────
 async function fetchCrowdData() {
   try {
-    const data = await apiFetch('/data');
-    const items = data.data || [];
+    const [metrics, cameras] = await Promise.all([
+      apiFetch(`${PYTHON_API}/api/v1/metrics`).catch(() => null),
+      apiFetch(`${PYTHON_API}/api/v1/cameras`).catch(() => []),
+    ]);
 
-    // KPIs
-    let maxC = 0, minC = Infinity, minName = '—', maxName = '—';
-    const uniqueLocs = new Set();
-    items.forEach(item => {
-      const key = `${item.coordinates.latitude.toFixed(4)},${item.coordinates.longitude.toFixed(4)}`;
-      uniqueLocs.add(key);
-      if (item.count > maxC) { maxC = item.count; maxName = shopName(item.coordinates.latitude, item.coordinates.longitude); }
-      if (item.count < minC) { minC = item.count; minName = shopName(item.coordinates.latitude, item.coordinates.longitude); }
-    });
-
-    const peak = data.maxCrowd ?? maxC;
-    const avg  = parseFloat(data.averageCrowd) || 0;
-    const forecast = (peak * 1.1).toFixed(1);
+    const totalIn       = metrics ? (metrics.total_in       || 0) : 0;
+    const netOccupancy  = metrics ? (metrics.net_occupancy  || 0) : 0;
+    const activeCameras = metrics ? (metrics.cameras_active || cameras.length || 0) : cameras.length;
+    const avgFps        = metrics ? (metrics.avg_fps        || 0) : 0;
+    const totalEvents   = metrics ? (metrics.events_logged  || 0) : 0;
     const now = new Date().toLocaleTimeString();
 
-    // Update KPI cards
-    document.getElementById('kpiPeak').textContent      = peak;
-    document.getElementById('kpiAvg').textContent       = avg;
-    document.getElementById('kpiLocations').textContent = uniqueLocs.size;
-    document.getElementById('kpiPreferred').textContent = minC < Infinity ? `${minName} (${minC})` : '—';
-    document.getElementById('kpiBusiest').textContent   = maxC > 0        ? `${maxName} (${maxC})`  : '—';
+    // Overview KPI cards
+    document.getElementById('kpiPeak').textContent      = totalIn;
+    document.getElementById('kpiAvg').textContent       = netOccupancy;
+    document.getElementById('kpiLocations').textContent = activeCameras;
+    document.getElementById('kpiPreferred').textContent = avgFps.toFixed(1);
+    document.getElementById('kpiBusiest').textContent   = totalEvents;
 
     // Map stats
-    document.getElementById('mapPeak').textContent = peak;
-    document.getElementById('mapAvg').textContent  = avg;
-    document.getElementById('mapBest').textContent = minC < Infinity ? `${minName} (${minC})` : '—';
+    document.getElementById('mapPeak').textContent = totalIn;
+    document.getElementById('mapAvg').textContent  = netOccupancy;
 
-    // Charts
-    pushToChart(ovPeakChart,     now, [peak]);
-    pushToChart(ovAvgChart,      now, [avg]);
-    pushToChart(ovForecastChart, now, [forecast]);
-    pushToChart(anPeakChart,     now, [peak]);
-    pushToChart(anAvgChart,      now, [avg]);
-    pushToChart(anForecastChart, now, [forecast]);
+    // Least occupied zone
+    if (cameras && cameras.length) {
+      const least = cameras.reduce((a, b) =>
+        (a.current_count || 0) <= (b.current_count || 0) ? a : b);
+      document.getElementById('mapBest').textContent =
+        `${cameraLabel(least.camera_id)} (${least.current_count || 0})`;
+    }
+
+    // Push to charts
+    const totalOut = metrics ? (metrics.total_out || 0) : 0;
+    pushToChart(ovPeakChart,     now, [totalIn]);
+    pushToChart(ovAvgChart,      now, [totalOut]);
+    pushToChart(ovForecastChart, now, [netOccupancy]);
+    pushToChart(anPeakChart,     now, [totalIn]);
+    pushToChart(anAvgChart,      now, [netOccupancy]);
+    pushToChart(anForecastChart, now, [cameras.reduce((s, c) => s + (c.current_count || 0), 0)]);
 
     // Map markers
-    if (leafletMap) updateMapMarkers(items);
+    if (leafletMap && cameras.length) updateMapMarkers(cameras);
 
-    // Recent table
-    recentData = items;
-    renderRecentTable(items);
+    // Overview camera status table
+    recentData = cameras;
+    renderRecentTable(cameras);
 
-    // System badge
     setBadge('ok');
   } catch (err) {
     console.error('fetchCrowdData error:', err);
@@ -279,37 +280,37 @@ function setBadge(status) {
   }
 }
 
-// ── Recent table ─────────────────────────────────────────────
-function renderRecentTable(items) {
+// ── Overview camera status table ─────────────────────────────
+function renderRecentTable(cameras) {
   const el = document.getElementById('recentTableContainer');
-  if (!items || items.length === 0) {
-    el.innerHTML = `<div class="state-box"><i class="fas fa-database"></i><p>No records found.</p></div>`;
+  if (!cameras || cameras.length === 0) {
+    el.innerHTML = `<div class="state-box"><i class="fas fa-video-slash"></i><p>No cameras active. Start the Python detection server.</p></div>`;
     return;
   }
   el.innerHTML = `
     <table>
       <thead>
         <tr>
-          <th>Location</th>
-          <th>Coordinates</th>
-          <th>Count</th>
+          <th>Camera Zone</th>
+          <th>IN</th>
+          <th>OUT</th>
+          <th>Current</th>
+          <th>FPS</th>
           <th>Status</th>
-          <th>Timestamp</th>
         </tr>
       </thead>
       <tbody>
-        ${items.map(item => {
-          const lat = item.coordinates.latitude;
-          const lng = item.coordinates.longitude;
-          const ts  = item.timestamp ? new Date(item.timestamp).toLocaleString() : '—';
-          const bc  = crowdBadgeClass(item.count);
-          const bl  = crowdLabel(item.count);
+        ${cameras.map(cam => {
+          const bc  = crowdBadgeClass(cam.current_count || 0);
+          const bl  = crowdLabel(cam.current_count || 0);
           return `<tr>
-            <td><strong>${shopName(lat, lng)}</strong></td>
-            <td style="font-size:12px;color:var(--muted)">${lat.toFixed(4)}, ${lng.toFixed(4)}</td>
-            <td><strong>${item.count}</strong></td>
+            <td><strong>${cameraLabel(cam.camera_id)}</strong><br/>
+              <span style="font-size:11px;color:var(--muted)">${cam.camera_id}</span></td>
+            <td><strong>${cam.count_in || 0}</strong></td>
+            <td><strong>${cam.count_out || 0}</strong></td>
+            <td><strong>${cam.current_count || 0}</strong></td>
+            <td style="font-size:12px">${(cam.fps || 0).toFixed(1)}</td>
             <td><span class="badge ${bc}">${bl}</span></td>
-            <td style="font-size:12px;color:var(--muted)">${ts}</td>
           </tr>`;
         }).join('')}
       </tbody>
@@ -319,100 +320,87 @@ function renderRecentTable(items) {
 function filterRecentTable() {
   const q = document.getElementById('recentSearch').value.trim().toLowerCase();
   if (!q) { renderRecentTable(recentData); return; }
-  renderRecentTable(recentData.filter(item => {
-    const name = shopName(item.coordinates.latitude, item.coordinates.longitude).toLowerCase();
-    return name.includes(q) ||
-      String(item.coordinates.latitude).includes(q) ||
-      String(item.coordinates.longitude).includes(q);
-  }));
+  renderRecentTable(recentData.filter(cam =>
+    cameraLabel(cam.camera_id).toLowerCase().includes(q) ||
+    cam.camera_id.toLowerCase().includes(q)
+  ));
 }
 
 // ── Map search ───────────────────────────────────────────────
 function searchOnMap() {
   const q = document.getElementById('mapSearchInput').value.trim().toLowerCase();
   const resultEl = document.getElementById('mapSearchResult');
-  if (!q) { resultEl.textContent = 'Please enter a shop name.'; return; }
+  if (!q) { resultEl.textContent = 'Please enter a camera zone name.'; return; }
 
-  for (const [coords, name] of Object.entries(SHOP_NAMES)) {
-    if (name.toLowerCase().includes(q)) {
-      const [lat, lng] = coords.split(',').map(Number);
-      leafletMap.setView([lat, lng], 16);
-      const key = `${lat.toFixed(4)},${lng.toFixed(4)}`;
-      if (mapMarkers[key]) mapMarkers[key].openPopup();
-      resultEl.textContent = `Found: ${name} at ${lat}, ${lng}`;
+  for (const [id, info] of Object.entries(CAMERA_COORDS)) {
+    if (info.label.toLowerCase().includes(q) || id.toLowerCase().includes(q)) {
+      leafletMap.setView([info.lat, info.lng], 18);
+      if (mapMarkers[id]) mapMarkers[id].openPopup();
+      resultEl.textContent = `Found: ${info.label} (${id})`;
       return;
     }
   }
-  resultEl.textContent = 'No shop found with that name.';
+  resultEl.textContent = 'No camera zone found with that name.';
 }
 
-// ── Shops section ────────────────────────────────────────────
+// ── Cameras section ──────────────────────────────────────────
 let shopsData = [];
 
 async function loadShops() {
   const el = document.getElementById('shopsTableContainer');
-  el.innerHTML = `<div class="state-box"><div class="spinner"></div><p>Loading shops…</p></div>`;
+  el.innerHTML = `<div class="state-box"><div class="spinner"></div><p>Loading cameras…</p></div>`;
   try {
-    const shops = await apiFetch('/shops');
-    shopsData = shops;
-
-    // Merge current crowd data for status
-    let crowdMap = {};
-    try {
-      const cd = await apiFetch('/data');
-      (cd.data || []).forEach(item => {
-        const key = `${item.coordinates.latitude.toFixed(4)},${item.coordinates.longitude.toFixed(4)}`;
-        if (!crowdMap[key] || item.count > crowdMap[key]) crowdMap[key] = item.count;
-      });
-    } catch (_) {}
-
-    renderShopsTable(shops, crowdMap);
+    const cameras = await apiFetch(`${PYTHON_API}/api/v1/cameras`);
+    shopsData = cameras;
+    renderShopsTable(cameras);
   } catch (err) {
     console.error('loadShops error:', err);
-    el.innerHTML = `<div class="state-box"><i class="fas fa-circle-exclamation"></i><p>Failed to load shops. Is the server running?</p></div>`;
+    el.innerHTML = `<div class="state-box"><i class="fas fa-circle-exclamation"></i><p>Failed to load camera data. Is the Python API running?</p></div>`;
   }
 }
 
-function renderShopsTable(shops, crowdMap) {
+function renderShopsTable(cameras) {
   const el = document.getElementById('shopsTableContainer');
-  if (!shops || shops.length === 0) {
-    el.innerHTML = `<div class="state-box"><i class="fas fa-store-slash"></i><p>No shops registered yet.</p></div>`;
+  if (!cameras || cameras.length === 0) {
+    el.innerHTML = `<div class="state-box"><i class="fas fa-video-slash"></i><p>No cameras configured.</p></div>`;
     return;
   }
   el.innerHTML = `
     <table>
       <thead>
         <tr>
-          <th>Shop Name</th>
-          <th>Coordinates</th>
-          <th>Video Feed</th>
-          <th>Live Crowd</th>
+          <th>Camera Zone</th>
+          <th>Source</th>
+          <th>IN</th>
+          <th>OUT</th>
+          <th>Now</th>
+          <th>FPS</th>
           <th>Status</th>
+          <th>Actions</th>
         </tr>
       </thead>
       <tbody>
-        ${shops.map(shop => {
-          // Try to match crowd count
-          let count = '—';
-          let bc = 'muted';
-          let bl = 'Unknown';
-          if (shop.coordinates) {
-            const parts = shop.coordinates.split(',');
-            if (parts.length >= 2) {
-              const key = `${parseFloat(parts[0]).toFixed(4)},${parseFloat(parts[1]).toFixed(4)}`;
-              if (crowdMap[key] !== undefined) {
-                count = crowdMap[key];
-                bc = crowdBadgeClass(count);
-                bl = crowdLabel(count);
-              }
-            }
-          }
+        ${cameras.map(cam => {
+          const bc  = crowdBadgeClass(cam.current_count || 0);
+          const bl  = crowdLabel(cam.current_count || 0);
+          const src = cam.source || cam.camera_id;
           return `<tr>
-            <td><strong>${shop.shopName || '—'}</strong></td>
-            <td style="font-size:12px;color:var(--muted)">${shop.coordinates || '—'}</td>
-            <td style="font-size:12px;color:var(--muted)">${shop.videoFeed ? `<a href="${shop.videoFeed}" target="_blank">View Feed</a>` : '—'}</td>
-            <td><strong>${count}</strong></td>
+            <td>
+              <strong>${cameraLabel(cam.camera_id)}</strong><br/>
+              <span style="font-size:11px;color:var(--muted)">${cam.camera_id}</span>
+            </td>
+            <td style="font-size:12px;color:var(--muted)">
+              ${String(src).split('/').pop()}
+            </td>
+            <td><strong>${cam.count_in || 0}</strong></td>
+            <td><strong>${cam.count_out || 0}</strong></td>
+            <td><strong>${cam.current_count || 0}</strong></td>
+            <td style="font-size:12px">${(cam.fps || 0).toFixed(1)}</td>
             <td><span class="badge ${bc}">${bl}</span></td>
+            <td>
+              <button class="btn-sm secondary" style="padding:4px 10px;font-size:11px"
+                onclick="resetCamera('${cam.camera_id}')">Reset</button>
+            </td>
           </tr>`;
         }).join('')}
       </tbody>
@@ -421,45 +409,40 @@ function renderShopsTable(shops, crowdMap) {
 
 function filterShopsTable() {
   const q = document.getElementById('shopSearch').value.trim().toLowerCase();
-  if (!q) { renderShopsTable(shopsData, {}); return; }
-  const filtered = shopsData.filter(s =>
-    (s.shopName || '').toLowerCase().includes(q) ||
-    (s.coordinates || '').toLowerCase().includes(q)
-  );
-  renderShopsTable(filtered, {});
+  if (!q) { renderShopsTable(shopsData); return; }
+  renderShopsTable(shopsData.filter(cam =>
+    cameraLabel(cam.camera_id).toLowerCase().includes(q) ||
+    cam.camera_id.toLowerCase().includes(q)
+  ));
 }
 
-// ── Top Shops ────────────────────────────────────────────────
+// ── Zone Rankings ────────────────────────────────────────────
 let topShopsChart = null;
 
 async function loadTopShops() {
   const el = document.getElementById('topShopsTableContainer');
   el.innerHTML = `<div class="state-box"><div class="spinner"></div><p>Loading…</p></div>`;
   try {
-    const data = await apiFetch('/api/top-shops');
-    renderTopShops(data);
+    const cameras = await apiFetch(`${PYTHON_API}/api/v1/cameras`);
+    renderTopShops(cameras);
   } catch (err) {
     console.error('loadTopShops error:', err);
-    el.innerHTML = `<div class="state-box"><i class="fas fa-circle-exclamation"></i><p>Failed to load top shops data.</p></div>`;
+    el.innerHTML = `<div class="state-box"><i class="fas fa-circle-exclamation"></i><p>Failed to load zone data. Is the Python API running?</p></div>`;
   }
 }
 
-function renderTopShops(data) {
+function renderTopShops(cameras) {
   const el = document.getElementById('topShopsTableContainer');
-  if (!data || data.length === 0) {
-    el.innerHTML = `<div class="state-box"><i class="fas fa-database"></i><p>No data available.</p></div>`;
+  if (!cameras || cameras.length === 0) {
+    el.innerHTML = `<div class="state-box"><i class="fas fa-database"></i><p>No camera zones available.</p></div>`;
     return;
   }
 
-  const labels = data.map((d, i) => {
-    if (d._id && d._id.latitude && d._id.longitude) {
-      return shopName(d._id.latitude, d._id.longitude);
-    }
-    return `Location ${i + 1}`;
-  });
-  const values = data.map(d => d.totalCrowd || 0);
+  // Sort by total IN descending
+  const sorted = [...cameras].sort((a, b) => (b.count_in || 0) - (a.count_in || 0));
+  const labels = sorted.map(c => cameraLabel(c.camera_id));
+  const values = sorted.map(c => c.count_in || 0);
 
-  // Chart
   if (topShopsChart) topShopsChart.destroy();
   const ctx = document.getElementById('topShopsChart');
   if (ctx) {
@@ -468,7 +451,7 @@ function renderTopShops(data) {
       data: {
         labels,
         datasets: [{
-          label: 'Total Crowd',
+          label: 'Total IN',
           data: values,
           backgroundColor: ['#4f8ef7', '#22c55e', '#f59e0b', '#ef4444', '#7c5cbf'],
           borderRadius: 6,
@@ -483,21 +466,23 @@ function renderTopShops(data) {
     });
   }
 
-  // Table
+  const totalIn = values.reduce((a, b) => a + b, 0);
   el.innerHTML = `
     <table>
       <thead>
-        <tr><th>#</th><th>Location</th><th>Total Crowd</th><th>Share</th></tr>
+        <tr><th>#</th><th>Zone</th><th>Total IN</th><th>Total OUT</th><th>Net Occ.</th><th>FPS</th><th>Share</th></tr>
       </thead>
       <tbody>
-        ${data.map((d, i) => {
-          const name = (d._id && d._id.latitude) ? shopName(d._id.latitude, d._id.longitude) : `Location ${i + 1}`;
-          const total = values.reduce((a, b) => a + b, 0);
-          const pct = total > 0 ? ((d.totalCrowd / total) * 100).toFixed(1) : 0;
+        ${sorted.map((cam, i) => {
+          const pct = totalIn > 0 ? (((cam.count_in || 0) / totalIn) * 100).toFixed(1) : 0;
+          const bc  = crowdBadgeClass(cam.current_count || 0);
           return `<tr>
             <td><strong>#${i + 1}</strong></td>
-            <td>${name}</td>
-            <td><strong>${d.totalCrowd || 0}</strong></td>
+            <td>${cameraLabel(cam.camera_id)}</td>
+            <td><strong>${cam.count_in || 0}</strong></td>
+            <td>${cam.count_out || 0}</td>
+            <td><span class="badge ${bc}">${cam.current_count || 0}</span></td>
+            <td style="font-size:12px">${(cam.fps || 0).toFixed(1)}</td>
             <td style="min-width:120px">
               <div style="display:flex;align-items:center;gap:8px">
                 <div style="flex:1;height:6px;border-radius:3px;background:var(--border)">
@@ -512,167 +497,171 @@ function renderTopShops(data) {
     </table>`;
 }
 
-// ── Heatmap ──────────────────────────────────────────────────
+// ── Occupancy section (was Heatmap) ──────────────────────────
 async function loadHeatmap() {
   const el = document.getElementById('heatmapContainer');
-  el.innerHTML = `<div class="state-box"><div class="spinner"></div><p>Loading heatmap data…</p></div>`;
+  el.innerHTML = `<div class="state-box"><div class="spinner"></div><p>Loading occupancy data…</p></div>`;
   try {
-    const data = await apiFetch('/api/heatmap');
-    if (!data || data.length === 0) {
-      el.innerHTML = `<div class="state-box"><i class="fas fa-fire"></i><p>No heatmap data available.</p></div>`;
+    const cameras = await apiFetch(`${PYTHON_API}/api/v1/cameras`);
+    if (!cameras || cameras.length === 0) {
+      el.innerHTML = `<div class="state-box"><i class="fas fa-fire"></i><p>No occupancy data. Start the detection server.</p></div>`;
       return;
     }
-    const maxCount = Math.max(...data.map(d => d.count || 0), 1);
+    const maxCount = Math.max(...cameras.map(c => c.current_count || 0), 1);
     el.innerHTML = `<div class="heatmap-list">
-      ${data.map(item => {
-        const lat = item.coordinates ? item.coordinates.latitude : '—';
-        const lng = item.coordinates ? item.coordinates.longitude : '—';
-        const count = item.count || 0;
+      ${cameras.map(cam => {
+        const count = cam.current_count || 0;
         const pct   = ((count / maxCount) * 100).toFixed(0);
         const color = crowdColor(count);
-        const name  = (lat !== '—') ? shopName(lat, lng) : '—';
+        const lbl   = crowdLabel(count);
         return `<div class="heatmap-item">
-          <div class="coord">${lat}, ${lng}</div>
-          <div style="font-weight:600;margin-bottom:4px;font-size:13px">${name}</div>
+          <div class="coord">${cam.camera_id}</div>
+          <div style="font-weight:600;margin-bottom:4px;font-size:13px">${cameraLabel(cam.camera_id)}</div>
           <div class="count" style="color:${color}">${count}</div>
           <div style="height:6px;border-radius:3px;background:var(--border);margin-top:8px;overflow:hidden">
             <div style="width:${pct}%;height:100%;border-radius:3px;background:${color}"></div>
           </div>
-          <div style="font-size:11px;color:var(--muted);margin-top:4px">${pct}% of peak</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:4px">
+            <span style="color:${color}">${lbl}</span> &bull; ${pct}% of peak &bull; IN: ${cam.count_in || 0}
+          </div>
         </div>`;
       }).join('')}
     </div>`;
   } catch (err) {
     console.error('loadHeatmap error:', err);
-    el.innerHTML = `<div class="state-box"><i class="fas fa-circle-exclamation"></i><p>Failed to load heatmap data.</p></div>`;
+    el.innerHTML = `<div class="state-box"><i class="fas fa-circle-exclamation"></i><p>Failed to load occupancy data.</p></div>`;
   }
 }
 
-// ── History ──────────────────────────────────────────────────
-let histChart = null;
-
+// ── Session History ──────────────────────────────────────────
 async function loadHistory() {
-  const shop = document.getElementById('histShop').value;
-  const time = document.getElementById('histTime').value;
+  const cameraFilter = document.getElementById('histShop').value;
   const tableEl = document.getElementById('histTableContainer');
-  tableEl.innerHTML = `<div class="state-box"><div class="spinner"></div><p>Fetching history…</p></div>`;
+  tableEl.innerHTML = `<div class="state-box"><div class="spinner"></div><p>Loading sessions…</p></div>`;
 
   try {
-    const data = await apiFetch(`/history?shop=${encodeURIComponent(shop)}&time=${time}`);
-    renderHistoryTable(data, shop);
+    // Load MAE evaluation summary
+    try {
+      const evalData = await apiFetch('/api/evaluation');
+      document.getElementById('maeCount').textContent = evalData.sessions_evaluated ?? '—';
+      document.getElementById('maeValue').textContent =
+        evalData.mae != null ? evalData.mae.toFixed(2) : '—';
+    } catch (_) {}
+
+    // Load sessions
+    const url = cameraFilter
+      ? `/api/sessions?camera_id=${encodeURIComponent(cameraFilter)}`
+      : '/api/sessions';
+    const sessions = await apiFetch(url);
+    renderSessionsTable(sessions);
   } catch (err) {
     console.error('loadHistory error:', err);
-    tableEl.innerHTML = `<div class="state-box"><i class="fas fa-circle-exclamation"></i><p>Failed to fetch history.</p></div>`;
-    document.getElementById('histChartWrap').style.display = 'none';
+    tableEl.innerHTML = `<div class="state-box"><i class="fas fa-circle-exclamation"></i><p>Failed to fetch sessions. Is the Node.js server running?</p></div>`;
   }
 }
 
-function renderHistoryTable(data, shop) {
+function renderSessionsTable(sessions) {
   const tableEl = document.getElementById('histTableContainer');
-  const chartWrap = document.getElementById('histChartWrap');
 
-  // Handle API returning object with message
-  if (!Array.isArray(data)) {
-    const msg = data.message || data.error || 'No data returned.';
-    tableEl.innerHTML = `<div class="state-box"><i class="fas fa-inbox"></i><p>${msg}</p></div>`;
-    chartWrap.style.display = 'none';
+  if (!Array.isArray(sessions) || sessions.length === 0) {
+    tableEl.innerHTML = `<div class="state-box"><i class="fas fa-inbox"></i><p>No sessions found.</p></div>`;
     return;
   }
 
-  if (data.length === 0) {
-    tableEl.innerHTML = `<div class="state-box"><i class="fas fa-inbox"></i><p>No records found for this time range.</p></div>`;
-    chartWrap.style.display = 'none';
-    return;
-  }
-
-  // Chart
-  chartWrap.style.display = 'block';
-  document.getElementById('histChartTitle').textContent = `Crowd History — ${shop}`;
-  if (histChart) histChart.destroy();
-  const ctx = document.getElementById('histChart');
-  if (ctx) {
-    const labels = data.map(d => new Date(d.timestamp).toLocaleTimeString());
-    const counts = data.map(d => d.count);
-    histChart = new Chart(ctx, {
-      type: 'line',
-      data: {
-        labels,
-        datasets: [{
-          label: 'Crowd Count',
-          data: counts,
-          borderColor: '#4f8ef7',
-          backgroundColor: '#4f8ef722',
-          fill: true,
-          tension: 0.35,
-          pointRadius: 3,
-        }],
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        scales: { y: { beginAtZero: true } },
-        plugins: { legend: { display: false } },
-      },
-    });
-  }
-
-  // Table
   tableEl.innerHTML = `
     <table>
       <thead>
         <tr>
-          <th>Timestamp</th>
-          <th>Crowd Count</th>
-          <th>Latitude</th>
-          <th>Longitude</th>
-          <th>Status</th>
+          <th>Camera</th>
+          <th>Started</th>
+          <th>IN</th>
+          <th>OUT</th>
+          <th>Ground Truth</th>
+          <th>Abs. Error</th>
+          <th>Actions</th>
         </tr>
       </thead>
       <tbody>
-        ${data.map(item => {
-          const ts  = item.timestamp ? new Date(item.timestamp).toLocaleString() : '—';
-          const bc  = crowdBadgeClass(item.count);
-          const bl  = crowdLabel(item.count);
-          const lat = item.coordinates ? item.coordinates.latitude : '—';
-          const lng = item.coordinates ? item.coordinates.longitude : '—';
+        ${sessions.map(s => {
+          const started = s.started_at ? new Date(s.started_at).toLocaleString() : '—';
+          const gt = s.ground_truth != null ? s.ground_truth : '—';
+          const err = (s.ground_truth != null)
+            ? Math.abs((s.count_in || 0) - s.ground_truth) : '—';
           return `<tr>
-            <td style="font-size:12px">${ts}</td>
-            <td><strong>${item.count}</strong></td>
-            <td style="font-size:12px;color:var(--muted)">${lat}</td>
-            <td style="font-size:12px;color:var(--muted)">${lng}</td>
-            <td><span class="badge ${bc}">${bl}</span></td>
+            <td><strong>${cameraLabel(s.camera_id) || s.camera_id || '—'}</strong></td>
+            <td style="font-size:12px">${started}</td>
+            <td>${s.count_in || 0}</td>
+            <td>${s.count_out || 0}</td>
+            <td>${gt}</td>
+            <td>${err !== '—' ? `<span class="badge ${err === 0 ? 'green' : 'amber'}">${err}</span>` : '—'}</td>
+            <td>
+              <button class="btn-sm secondary" style="padding:4px 10px;font-size:11px"
+                onclick="openGtForm('${s._id || s.id}', ${s.ground_truth != null ? s.ground_truth : 'null'})">
+                Set GT
+              </button>
+            </td>
           </tr>`;
         }).join('')}
       </tbody>
     </table>`;
 }
 
-// ── Analytics — Shop Comparison ──────────────────────────────
+function openGtForm(sessionId, currentGt) {
+  document.getElementById('gtFormWrap').style.display = 'block';
+  document.getElementById('gtSessionId').value = sessionId;
+  document.getElementById('gtValue').value = currentGt != null ? currentGt : '';
+  document.getElementById('gtFormWrap').scrollIntoView({ behavior: 'smooth' });
+}
+
+async function saveGroundTruth() {
+  const id  = document.getElementById('gtSessionId').value;
+  const val = parseInt(document.getElementById('gtValue').value, 10);
+  if (!id || isNaN(val)) { alert('Please enter a valid count.'); return; }
+  try {
+    const resp = await fetch(`/api/sessions/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ground_truth: val }),
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    document.getElementById('gtFormWrap').style.display = 'none';
+    loadHistory();
+  } catch (err) {
+    console.error('saveGroundTruth error:', err);
+    alert('Failed to save ground truth.');
+  }
+}
+
+// ── Analytics — Camera Comparison ───────────────────────────
 let compareChart = null;
 
 async function loadCompareChart() {
-  const shop1 = document.getElementById('compareShop1').value;
-  const shop2 = document.getElementById('compareShop2').value;
+  const cam1 = document.getElementById('compareShop1').value;
+  const cam2 = document.getElementById('compareShop2').value;
 
-  const [lat1, lng1] = shop1.split(',');
-  const [lat2, lng2] = shop2.split(',');
-
-  const name1 = shopName(lat1, lng1);
-  const name2 = shopName(lat2, lng2);
+  const name1 = cameraLabel(cam1);
+  const name2 = cameraLabel(cam2);
 
   try {
+    // Pull recent events for each camera from the detection API
     const [d1, d2] = await Promise.all([
-      apiFetch(`/api/historical-data?latitude=${lat1}&longitude=${lng1}`),
-      apiFetch(`/api/historical-data?latitude=${lat2}&longitude=${lng2}`),
+      apiFetch(`${PYTHON_API}/api/v1/cameras/${cam1}/events`).catch(() => []),
+      apiFetch(`${PYTHON_API}/api/v1/cameras/${cam2}/events`).catch(() => []),
     ]);
 
-    const labels = [...new Set([
-      ...(d1.map ? d1.map(d => new Date(d.timestamp).toLocaleTimeString()) : []),
-      ...(d2.map ? d2.map(d => new Date(d.timestamp).toLocaleTimeString()) : []),
-    ])].slice(0, 30);
+    const toSeries = (evts) => {
+      if (!Array.isArray(evts)) return { labels: [], data: [] };
+      const sorted = [...evts].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+      let cumIn = 0;
+      return {
+        labels: sorted.map(e => new Date(e.timestamp).toLocaleTimeString()),
+        data:   sorted.map(e => { if (e.direction === 'in') cumIn++; return cumIn; }),
+      };
+    };
 
-    const counts1 = d1.map ? d1.slice(0, 30).map(d => d.count) : [];
-    const counts2 = d2.map ? d2.slice(0, 30).map(d => d.count) : [];
+    const s1 = toSeries(d1);
+    const s2 = toSeries(d2);
+    const labels = s1.labels.length >= s2.labels.length ? s1.labels : s2.labels;
 
     if (compareChart) compareChart.destroy();
     const ctx = document.getElementById('anCompareChart');
@@ -682,8 +671,8 @@ async function loadCompareChart() {
         data: {
           labels,
           datasets: [
-            { label: name1, data: counts1, borderColor: '#4f8ef7', backgroundColor: '#4f8ef722', fill: true, tension: 0.35, pointRadius: 3 },
-            { label: name2, data: counts2, borderColor: '#22c55e', backgroundColor: '#22c55e22', fill: true, tension: 0.35, pointRadius: 3 },
+            { label: name1, data: s1.data, borderColor: '#4f8ef7', backgroundColor: '#4f8ef722', fill: true, tension: 0.35, pointRadius: 3 },
+            { label: name2, data: s2.data, borderColor: '#22c55e', backgroundColor: '#22c55e22', fill: true, tension: 0.35, pointRadius: 3 },
           ],
         },
         options: {
@@ -701,7 +690,7 @@ async function loadCompareChart() {
 
 // ── Health ───────────────────────────────────────────────────
 async function loadHealth() {
-  await Promise.allSettled([loadNodeHealth(), loadPyHealth(), loadOrchHealth()]);
+  await Promise.allSettled([loadNodeHealth(), loadPyHealth(), loadOrchHealth(), loadDetEngineHealth()]);
 }
 
 async function loadNodeHealth() {
@@ -779,6 +768,30 @@ function renderHealthRows(rows) {
     </div>`).join('');
 }
 
+async function loadDetEngineHealth() {
+  const badge = document.getElementById('detEngineHealthBadge');
+  const body  = document.getElementById('detEngineHealthBody');
+  if (!badge || !body) return;
+  try {
+    const data = await apiFetch(`${PYTHON_API}/api/v1/metrics`);
+    const active = data.cameras_active || 0;
+    badge.className = active > 0 ? 'badge green' : 'badge amber';
+    badge.textContent = active > 0 ? 'Running' : 'Idle';
+    body.innerHTML = renderHealthRows({
+      'Model':           data.model || 'yolov8n',
+      'Cameras Active':  active,
+      'Avg FPS':         (data.avg_fps || 0).toFixed(1),
+      'Total IN':        data.total_in || 0,
+      'Net Occupancy':   data.net_occupancy || 0,
+      'Events Logged':   data.events_logged || 0,
+    });
+  } catch (err) {
+    badge.className = 'badge muted';
+    badge.textContent = 'Offline';
+    body.innerHTML = `<div class="state-box" style="padding:20px"><i class="fas fa-plug-circle-xmark"></i><p>Detection engine not reachable (port 8000).</p></div>`;
+  }
+}
+
 // ── Global refresh ───────────────────────────────────────────
 function refreshAll() {
   fetchCrowdData();
@@ -787,6 +800,7 @@ function refreshAll() {
   if (currentSection === 'heatmap')        loadHeatmap();
   if (currentSection === 'health')         loadHealth();
   if (currentSection === 'live-detection') loadDetectionData();
+  if (currentSection === 'history')        loadHistory();
 }
 
 // ── Live Detection ───────────────────────────────────────────

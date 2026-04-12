@@ -161,8 +161,8 @@
   <div class="app-shell">
     <aside class="sidebar" id="sidebar">
       <div class="sidebar-brand">
-        <div class="logo-icon">📡</div>
-        <span class="brand-name">CrowdSense</span>
+        <div class="logo-icon">🎓</div>
+        <span class="brand-name">KIU CrowdSense</span>
       </div>
       <nav class="sidebar-nav">
         <div class="nav-section-label">Main</div>
@@ -176,20 +176,20 @@
           <i class="fas fa-map-location-dot"></i> Live Map
         </div>
         <div class="nav-item" data-section="shops" onclick="navigate('shops')">
-          <i class="fas fa-store"></i> Shops
+          <i class="fas fa-video"></i> Cameras
         </div>
         <div class="nav-section-label" style="margin-top:8px">Analytics</div>
         <div class="nav-item" data-section="analytics" onclick="navigate('analytics')">
-          <i class="fas fa-chart-line"></i> Trends &amp; Charts
+          <i class="fas fa-chart-line"></i> Analytics
         </div>
         <div class="nav-item" data-section="top-shops" onclick="navigate('top-shops')">
-          <i class="fas fa-trophy"></i> Top Locations
+          <i class="fas fa-trophy"></i> Zone Rankings
         </div>
         <div class="nav-item" data-section="heatmap" onclick="navigate('heatmap')">
-          <i class="fas fa-fire"></i> Heatmap Data
+          <i class="fas fa-fire"></i> Occupancy
         </div>
         <div class="nav-item" data-section="history" onclick="navigate('history')">
-          <i class="fas fa-clock-rotate-left"></i> History
+          <i class="fas fa-clock-rotate-left"></i> Sessions
         </div>
         <div class="nav-section-label" style="margin-top:8px">System</div>
         <div class="nav-item" data-section="health" onclick="navigate('health')">
@@ -197,8 +197,8 @@
         </div>
       </nav>
       <div class="sidebar-footer">
-        <div>CrowdSense v2.0</div>
-        <div style="margin-top:4px">© Group-15, SY-IT-C</div>
+        <div>KIU CrowdSense v2.0</div>
+        <div style="margin-top:4px">FYP — BSc CS, KIU</div>
       </div>
     </aside>
 
@@ -228,58 +228,58 @@
         <section class="section active" id="sec-overview">
           <div class="section-header">
             <h2>Overview</h2>
-            <p>Live summary of crowd activity across all monitored locations.</p>
+            <p>KIU Campus — real-time people detection and counting using YOLOv8 + ByteTrack.</p>
           </div>
           <div class="cards-row">
             <div class="card">
-              <div class="card-icon blue"><i class="fas fa-users"></i></div>
-              <div class="card-label">Peak Crowd</div>
+              <div class="card-icon blue"><i class="fas fa-right-to-bracket"></i></div>
+              <div class="card-label">Total IN</div>
               <div class="card-value" id="kpiPeak">—</div>
-              <div class="card-sub">Highest in last 50 records</div>
+              <div class="card-sub">People entered across all zones</div>
             </div>
             <div class="card">
-              <div class="card-icon green"><i class="fas fa-chart-simple"></i></div>
-              <div class="card-label">Average Crowd</div>
+              <div class="card-icon green"><i class="fas fa-users"></i></div>
+              <div class="card-label">Net Occupancy</div>
               <div class="card-value" id="kpiAvg">—</div>
-              <div class="card-sub">Across all active locations</div>
+              <div class="card-sub">Current people on campus</div>
             </div>
             <div class="card">
-              <div class="card-icon amber"><i class="fas fa-store"></i></div>
-              <div class="card-label">Active Locations</div>
+              <div class="card-icon amber"><i class="fas fa-camera"></i></div>
+              <div class="card-label">Active Cameras</div>
               <div class="card-value" id="kpiLocations">—</div>
-              <div class="card-sub">Unique monitored sites</div>
+              <div class="card-sub">Zones being monitored</div>
             </div>
             <div class="card">
-              <div class="card-icon purple"><i class="fas fa-star"></i></div>
-              <div class="card-label">Preferred Spot</div>
-              <div class="card-value" id="kpiPreferred" style="font-size:15px;line-height:1.4">—</div>
-              <div class="card-sub">Least crowded right now</div>
+              <div class="card-icon purple"><i class="fas fa-gauge"></i></div>
+              <div class="card-label">Avg FPS</div>
+              <div class="card-value" id="kpiPreferred" style="font-size:28px;line-height:1">—</div>
+              <div class="card-sub">Detection throughput</div>
             </div>
             <div class="card">
-              <div class="card-icon red"><i class="fas fa-triangle-exclamation"></i></div>
-              <div class="card-label">Busiest Spot</div>
-              <div class="card-value" id="kpiBusiest" style="font-size:15px;line-height:1.4">—</div>
-              <div class="card-sub">Highest crowd density</div>
+              <div class="card-icon red"><i class="fas fa-list-check"></i></div>
+              <div class="card-label">Events Logged</div>
+              <div class="card-value" id="kpiBusiest" style="font-size:28px;line-height:1">—</div>
+              <div class="card-sub">Total crossing events</div>
             </div>
           </div>
           <div class="charts-grid">
             <div class="chart-card">
-              <h3>📈 Peak Crowd Over Time</h3>
+              <h3>📈 IN Count Over Time</h3>
               <canvas id="ovPeakChart"></canvas>
             </div>
             <div class="chart-card">
-              <h3>📊 Average Crowd Over Time</h3>
+              <h3>📊 OUT Count Over Time</h3>
               <canvas id="ovAvgChart"></canvas>
             </div>
             <div class="chart-card">
-              <h3>🔮 Forecast Trend</h3>
+              <h3>🏛 Net Occupancy Trend</h3>
               <canvas id="ovForecastChart"></canvas>
             </div>
           </div>
           <div class="table-wrap">
             <div class="table-toolbar">
-              <h3>Recent Readings</h3>
-              <input class="search-input" id="recentSearch" placeholder="Filter location…" oninput="filterRecentTable()" />
+              <h3>Camera Status</h3>
+              <input class="search-input" id="recentSearch" placeholder="Filter camera…" oninput="filterRecentTable()" />
             </div>
             <div id="recentTableContainer">
               <div class="state-box"><div class="spinner"></div><p>Loading…</p></div>
@@ -346,53 +346,55 @@
         <!-- LIVE MAP -->
         <section class="section" id="sec-live-map">
           <div class="section-header">
-            <h2>Live Map</h2>
-            <p>Real-time crowd density markers. Updates every 5 seconds.</p>
+            <h2>Campus Map</h2>
+            <p>Live crowd density at each KIU camera zone. Markers update every 5 seconds.</p>
           </div>
           <div class="map-legend">
-            <div class="legend-item"><div class="legend-dot" style="background:#22c55e"></div> Low (0–2)</div>
-            <div class="legend-item"><div class="legend-dot" style="background:#f59e0b"></div> Moderate (3–5)</div>
-            <div class="legend-item"><div class="legend-dot" style="background:#ef4444"></div> High (6+)</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#22c55e"></div> Low (0–5)</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#f59e0b"></div> Moderate (6–15)</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#ef4444"></div> High (16+)</div>
           </div>
           <div id="map"></div>
           <div class="cards-row mt-4" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr))">
             <div class="card">
-              <div class="card-label">Peak Crowd</div>
+              <div class="card-label">Total IN</div>
               <div class="card-value" id="mapPeak">—</div>
             </div>
             <div class="card">
-              <div class="card-label">Avg Crowd</div>
+              <div class="card-label">Net Occupancy</div>
               <div class="card-value" id="mapAvg">—</div>
             </div>
             <div class="card">
-              <div class="card-label">Best Shop</div>
+              <div class="card-label">Least Occupied Zone</div>
               <div class="card-value" id="mapBest" style="font-size:14px">—</div>
             </div>
           </div>
           <div class="card mt-4">
-            <h3 style="font-size:14px;margin-bottom:12px">🔍 Find a Location</h3>
+            <h3 style="font-size:14px;margin-bottom:12px">🔍 Find a Campus Zone</h3>
             <div style="display:flex;gap:10px;flex-wrap:wrap">
-              <input class="search-input" id="mapSearchInput" placeholder="Shop name…" style="flex:1;min-width:160px" />
+              <input class="search-input" id="mapSearchInput" placeholder="Zone name (e.g. Library)…" style="flex:1;min-width:160px" />
               <button class="btn-sm" onclick="searchOnMap()">Search</button>
             </div>
             <p class="text-muted mt-4" id="mapSearchResult"></p>
           </div>
         </section>
 
-        <!-- SHOPS -->
+        <!-- CAMERAS (was Shops) -->
         <section class="section" id="sec-shops">
           <div class="section-header">
-            <h2>Shops &amp; Locations</h2>
-            <p>All registered shop locations and their current crowd status.</p>
+            <h2>Cameras</h2>
+            <p>All configured KIU campus camera zones and their live detection status.</p>
           </div>
           <div class="table-wrap">
             <div class="table-toolbar">
-              <h3>All Locations</h3>
-              <input class="search-input" id="shopSearch" placeholder="Search shops…" oninput="filterShopsTable()" />
-              <button class="btn-sm secondary" onclick="loadShops()"><i class="fas fa-rotate-right"></i></button>
+              <h3>Camera Zones</h3>
+              <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+                <input class="search-input" id="shopSearch" placeholder="Filter cameras…" oninput="filterShopsTable()" />
+                <button class="btn-sm secondary" onclick="loadShops()"><i class="fas fa-rotate-right"></i></button>
+              </div>
             </div>
             <div id="shopsTableContainer">
-              <div class="state-box"><div class="spinner"></div><p>Loading shops…</p></div>
+              <div class="state-box"><div class="spinner"></div><p>Loading cameras…</p></div>
             </div>
           </div>
         </section>
@@ -400,43 +402,37 @@
         <!-- ANALYTICS -->
         <section class="section" id="sec-analytics">
           <div class="section-header">
-            <h2>Trends &amp; Charts</h2>
-            <p>Time-series analytics for all monitored locations.</p>
+            <h2>Detection Analytics</h2>
+            <p>Time-series charts for people detection counts across all camera zones.</p>
           </div>
           <div class="charts-grid">
             <div class="chart-card">
-              <h3>📈 Peak Crowd Trend</h3>
+              <h3>📈 Total IN Trend</h3>
               <canvas id="anPeakChart"></canvas>
             </div>
             <div class="chart-card">
-              <h3>📊 Average Crowd Trend</h3>
+              <h3>📊 Net Occupancy Trend</h3>
               <canvas id="anAvgChart"></canvas>
             </div>
             <div class="chart-card">
-              <h3>🔮 Forecasted Crowd</h3>
+              <h3>🎯 Current Count Trend</h3>
               <canvas id="anForecastChart"></canvas>
             </div>
             <div class="chart-card" style="grid-column:1/-1">
-              <h3>🏪 Shop Comparison — Historical Crowd</h3>
+              <h3>📷 Camera Comparison — IN Count</h3>
               <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:14px">
                 <div class="form-group">
-                  <label>Shop A</label>
+                  <label>Camera A</label>
                   <select class="form-select" id="compareShop1">
-                    <option value="18.5204,73.8567">Zudio</option>
-                    <option value="18.5250,73.8567">Phoenix Mall</option>
-                    <option value="18.5369,73.8567">Kaka Halwai</option>
-                    <option value="18.5650,73.8567">Shaniwar Peth</option>
-                    <option value="18.5850,73.8567">Starbucks</option>
+                    <option value="kiu-main-entrance">Main Entrance</option>
+                    <option value="kiu-library">Library</option>
                   </select>
                 </div>
                 <div class="form-group">
-                  <label>Shop B</label>
+                  <label>Camera B</label>
                   <select class="form-select" id="compareShop2">
-                    <option value="18.5250,73.8567">Phoenix Mall</option>
-                    <option value="18.5204,73.8567">Zudio</option>
-                    <option value="18.5369,73.8567">Kaka Halwai</option>
-                    <option value="18.5650,73.8567">Shaniwar Peth</option>
-                    <option value="18.5850,73.8567">Starbucks</option>
+                    <option value="kiu-library">Library</option>
+                    <option value="kiu-main-entrance">Main Entrance</option>
                   </select>
                 </div>
                 <div class="form-group" style="justify-content:flex-end">
@@ -449,14 +445,14 @@
           </div>
         </section>
 
-        <!-- TOP SHOPS -->
+        <!-- ZONE RANKINGS (was Top Shops) -->
         <section class="section" id="sec-top-shops">
           <div class="section-header">
-            <h2>Top Locations</h2>
-            <p>Ranked by total cumulative crowd count.</p>
+            <h2>Zone Rankings</h2>
+            <p>Camera zones ranked by total people detected (IN count).</p>
           </div>
           <div class="chart-card mb-4">
-            <h3>🏆 Top Locations by Total Crowd</h3>
+            <h3>🏆 Zone Rankings by Total IN</h3>
             <canvas id="topShopsChart" style="max-height:300px"></canvas>
           </div>
           <div class="table-wrap">
@@ -467,61 +463,66 @@
           </div>
         </section>
 
-        <!-- HEATMAP -->
+        <!-- OCCUPANCY (was Heatmap) -->
         <section class="section" id="sec-heatmap">
           <div class="section-header">
-            <h2>Heatmap Data</h2>
-            <p>Crowd density for every recorded coordinate pair.</p>
+            <h2>Occupancy</h2>
+            <p>Current crowd density per campus zone with Low / Moderate / High classification.</p>
           </div>
           <div id="heatmapContainer">
-            <div class="state-box"><div class="spinner"></div><p>Loading heatmap data…</p></div>
+            <div class="state-box"><div class="spinner"></div><p>Loading occupancy data…</p></div>
           </div>
         </section>
 
-        <!-- HISTORY -->
+        <!-- SESSIONS (was History) -->
         <section class="section" id="sec-history">
           <div class="section-header">
-            <h2>History</h2>
-            <p>Historical crowd readings for a selected location and time window.</p>
+            <h2>Session History</h2>
+            <p>Detection sessions stored in MongoDB with optional ground-truth evaluation (MAE).</p>
           </div>
-          <div class="history-controls">
-            <div class="form-group">
-              <label>Shop</label>
-              <select class="form-select" id="histShop">
-                <option value="Zudio">Zudio</option>
-                <option value="Pheonix Mall">Phoenix Mall</option>
-                <option value="Kaka Halwai">Kaka Halwai</option>
-                <option value="Shaniwar Peth">Shaniwar Peth</option>
-                <option value="Starbucks">Starbucks</option>
-              </select>
+          <!-- MAE summary -->
+          <div class="cards-row mb-4" id="maeCards" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr))">
+            <div class="card">
+              <div class="card-label">Sessions Evaluated</div>
+              <div class="card-value" id="maeCount">—</div>
             </div>
+            <div class="card">
+              <div class="card-label">Mean Abs Error</div>
+              <div class="card-value" id="maeValue">—</div>
+            </div>
+          </div>
+          <!-- Controls -->
+          <div class="history-controls" style="margin-bottom:16px">
             <div class="form-group">
-              <label>Time window</label>
-              <select class="form-select" id="histTime">
-                <option value="5">Last 5 min</option>
-                <option value="10">Last 10 min</option>
-                <option value="30" selected>Last 30 min</option>
-                <option value="60">Last 1 hour</option>
-                <option value="120">Last 2 hours</option>
+              <label>Camera Filter</label>
+              <select class="form-select" id="histShop">
+                <option value="">All Cameras</option>
+                <option value="kiu-main-entrance">Main Entrance</option>
+                <option value="kiu-library">Library</option>
               </select>
             </div>
             <div class="form-group" style="justify-content:flex-end">
               <label>&nbsp;</label>
               <button class="btn-sm" onclick="loadHistory()">
-                <i class="fas fa-search"></i> Fetch History
+                <i class="fas fa-search"></i> Load Sessions
               </button>
             </div>
           </div>
-          <div class="chart-card mb-4" id="histChartWrap" style="display:none">
-            <h3 id="histChartTitle">Crowd History</h3>
-            <canvas id="histChart" style="max-height:260px"></canvas>
+          <!-- Ground-truth input -->
+          <div class="card mb-4" id="gtFormWrap" style="display:none">
+            <h3 style="font-size:14px;margin-bottom:10px">✏️ Set Ground Truth for Session</h3>
+            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+              <input class="search-input" id="gtSessionId" placeholder="Session ID" style="flex:1;min-width:160px" readonly />
+              <input class="search-input" id="gtValue" type="number" min="0" placeholder="Actual count" style="width:130px" />
+              <button class="btn-sm" onclick="saveGroundTruth()">Save</button>
+            </div>
           </div>
           <div class="table-wrap">
-            <div class="table-toolbar"><h3>Records</h3></div>
+            <div class="table-toolbar"><h3>Sessions</h3></div>
             <div id="histTableContainer">
               <div class="state-box">
                 <i class="fas fa-clock-rotate-left"></i>
-                <p>Select a shop and time window, then click Fetch History.</p>
+                <p>Click "Load Sessions" to view detection history.</p>
               </div>
             </div>
           </div>
@@ -531,13 +532,13 @@
         <section class="section" id="sec-health">
           <div class="section-header">
             <h2>System Health</h2>
-            <p>Live status of the Node.js dashboard server and Python crowd-estimation API.</p>
+            <p>Live status of the Node.js server, Python detection API, orchestrator, and YOLOv8 engine.</p>
           </div>
           <div class="health-grid">
             <div class="health-card">
               <div class="health-card-header">
                 <i class="fab fa-node-js" style="font-size:20px;color:#8cc84b"></i>
-                <h3>Node.js Dashboard</h3>
+                <h3>Node.js Server</h3>
                 <span class="badge muted" id="nodeHealthBadge">—</span>
               </div>
               <div id="nodeHealthBody">
@@ -547,7 +548,7 @@
             <div class="health-card">
               <div class="health-card-header">
                 <i class="fab fa-python" style="font-size:20px;color:#4b8bbe"></i>
-                <h3>Python Estimation API</h3>
+                <h3>FastAPI Detection Server</h3>
                 <span class="badge muted" id="pyHealthBadge">—</span>
               </div>
               <div id="pyHealthBody">
@@ -557,10 +558,20 @@
             <div class="health-card">
               <div class="health-card-header">
                 <i class="fas fa-sitemap" style="font-size:18px;color:var(--accent2)"></i>
-                <h3>Orchestrator Metrics</h3>
+                <h3>Orchestrator Pipeline</h3>
                 <span class="badge muted" id="orchHealthBadge">—</span>
               </div>
               <div id="orchHealthBody">
+                <div class="state-box"><div class="spinner"></div><p>Checking…</p></div>
+              </div>
+            </div>
+            <div class="health-card">
+              <div class="health-card-header">
+                <i class="fas fa-robot" style="font-size:18px;color:var(--accent)"></i>
+                <h3>YOLOv8 Detection Engine</h3>
+                <span class="badge muted" id="detEngineHealthBadge">—</span>
+              </div>
+              <div id="detEngineHealthBody">
                 <div class="state-box"><div class="spinner"></div><p>Checking…</p></div>
               </div>
             </div>
