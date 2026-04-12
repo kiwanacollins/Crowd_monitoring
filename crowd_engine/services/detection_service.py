@@ -211,6 +211,7 @@ class _CameraWorker:
         _cap_frame:  List[Optional[np.ndarray]] = [None]
         _cap_lock    = threading.Lock()
         _cap_seq:    List[int] = [0]
+        _video_looped: List[bool] = [False]   # capture signals video restart
 
         # Tracked objects from last YOLO/HOG run
         _objs: List[list] = [[]]
@@ -241,6 +242,8 @@ class _CameraWorker:
                     cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                     frame_idx = 0
                     session_t = time.monotonic()
+                    with _cap_lock:
+                        _video_looped[0] = True
                     time.sleep(0.03)
                     continue
 
@@ -319,27 +322,37 @@ class _CameraWorker:
         frame_count  = 0
         fps_t        = time.monotonic()
         last_inf_seq = -1
+        _tracker_persist = True   # False for first frame after video loop
 
         while self._running:
             # Grab latest captured frame; skip if unchanged since last run
             with _cap_lock:
                 frame = _cap_frame[0]
                 seq   = _cap_seq[0]
+                looped = _video_looped[0]
+                if looped:
+                    _video_looped[0] = False
             if frame is None or seq == last_inf_seq:
                 time.sleep(0.005)
                 continue
             last_inf_seq = seq
 
+            # Video looped → reset tracker + counting state
+            if looped and not is_live:
+                _tracker_persist = False
+                self._prev_centroids = {}
+                self._counted_ids.clear()
+
             h, w = frame.shape[:2]
             curr_centroids: Dict[int, Tuple[int, int]] = {}
-            self.current_count = 0
             new_objs: list = []
+            new_count = 0
 
             # ── YOLOv8 + ByteTrack ─────────────────────────────────────────
             if model is not None:
                 results = model.track(
                     frame,
-                    persist=True,
+                    persist=_tracker_persist,
                     classes=[0],
                     conf=_YOLO_CONF,
                     iou=_YOLO_IOU,
@@ -347,9 +360,10 @@ class _CameraWorker:
                     verbose=False,
                     tracker="bytetrack.yaml",
                 )
+                _tracker_persist = True  # re-enable after reset frame
                 boxes = results[0].boxes
                 if boxes is not None and boxes.id is not None:
-                    self.current_count = len(boxes)
+                    new_count = len(boxes)
                     for xyxy, tid, conf in zip(
                         boxes.xyxy.cpu().numpy(),
                         boxes.id.cpu().numpy(),
@@ -385,13 +399,16 @@ class _CameraWorker:
                             int(x * inv), int(y * inv),
                             int((x + bw) * inv), int((y + bh) * inv), conf,
                         ))
-                self.current_count = len(hog_last_boxes)
+                new_count = len(hog_last_boxes)
                 for i, (x1, y1, x2, y2, conf) in enumerate(hog_last_boxes):
                     new_objs.append({
                         "x1": x1, "y1": y1, "x2": x2, "y2": y2,
                         "tid": i, "conf": conf,
                     })
                     curr_centroids[i] = ((x1 + x2) // 2, (y1 + y2) // 2)
+
+            # Update count AFTER inference — avoids API reading stale 0
+            self.current_count = new_count
 
             with _objs_lock:
                 _objs[0] = new_objs
