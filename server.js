@@ -336,6 +336,125 @@ app.get('/api/heatmap', async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
+// ── Detection Session Storage (FYP evaluation data) ──────────────────────
+
+const detectionSessionSchema = new mongoose.Schema({
+    camera_id:     { type: String, required: true, index: true },
+    label:         String,
+    started_at:    { type: Date, default: Date.now },
+    ended_at:      Date,
+    count_in:      { type: Number, default: 0 },
+    count_out:     { type: Number, default: 0 },
+    peak_count:    { type: Number, default: 0 },
+    avg_fps:       Number,
+    ground_truth:  Number,   // manual ground-truth count for MAE evaluation
+    notes:         String
+});
+
+const detectionEventSchema = new mongoose.Schema({
+    camera_id:   { type: String, required: true, index: true },
+    session_id:  { type: mongoose.Schema.Types.ObjectId, ref: 'DetectionSession', index: true },
+    direction:   { type: String, enum: ['in', 'out'], required: true },
+    track_id:    Number,
+    timestamp:   { type: Date, default: Date.now }
+});
+
+const DetectionSession = mongoose.model('DetectionSession', detectionSessionSchema);
+const DetectionEvent   = mongoose.model('DetectionEvent',   detectionEventSchema);
+
+// POST /api/sessions — called by Python API when a camera session starts/ends
+app.post('/api/sessions', async (req, res) => {
+    try {
+        const session = new DetectionSession(req.body);
+        await session.save();
+        res.status(201).json(session);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// GET /api/sessions — list all sessions (optionally filter by camera)
+app.get('/api/sessions', async (req, res) => {
+    try {
+        const filter = req.query.camera_id ? { camera_id: req.query.camera_id } : {};
+        const sessions = await DetectionSession.find(filter).sort({ started_at: -1 }).limit(100);
+        res.json(sessions);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// GET /api/sessions/:id — single session detail
+app.get('/api/sessions/:id', async (req, res) => {
+    try {
+        const session = await DetectionSession.findById(req.params.id);
+        if (!session) return res.status(404).json({ error: 'Session not found' });
+        res.json(session);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// PATCH /api/sessions/:id — update session (e.g., add ground_truth after manual count)
+app.patch('/api/sessions/:id', async (req, res) => {
+    try {
+        const session = await DetectionSession.findByIdAndUpdate(
+            req.params.id, req.body, { new: true, runValidators: true }
+        );
+        if (!session) return res.status(404).json({ error: 'Session not found' });
+        res.json(session);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// GET /api/sessions/:id/events — get all crossing events for a session
+app.get('/api/sessions/:id/events', async (req, res) => {
+    try {
+        const events = await DetectionEvent.find({ session_id: req.params.id }).sort({ timestamp: 1 });
+        res.json(events);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/events — log a single crossing event
+app.post('/api/events', async (req, res) => {
+    try {
+        const event = new DetectionEvent(req.body);
+        await event.save();
+        res.status(201).json(event);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// GET /api/evaluation — MAE report: sessions with ground_truth set
+app.get('/api/evaluation', async (req, res) => {
+    try {
+        const sessions = await DetectionSession.find({ ground_truth: { $exists: true, $ne: null } });
+        const results = sessions.map(s => {
+            const predicted = s.count_in;
+            const gt        = s.ground_truth;
+            return {
+                session_id: s._id,
+                camera_id:  s.camera_id,
+                started_at: s.started_at,
+                count_in:   predicted,
+                ground_truth: gt,
+                abs_error:  Math.abs(predicted - gt),
+                pct_error:  gt > 0 ? ((Math.abs(predicted - gt) / gt) * 100).toFixed(2) : null
+            };
+        });
+        const mae = results.length
+            ? (results.reduce((sum, r) => sum + r.abs_error, 0) / results.length).toFixed(2)
+            : null;
+        res.json({ mae, n: results.length, sessions: results });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 connectToDatabase().then(() => {
     app.listen(port, () => {
         console.log(`Server is running on http://localhost:${port}`);
