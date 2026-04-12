@@ -9,6 +9,8 @@
 // ── Constants ────────────────────────────────────────────────
 const PYTHON_API = 'http://localhost:8000';
 const REFRESH_INTERVAL = 5000; // ms
+const LIVE_CAMERA_STATS_INTERVAL = 1000; // ms (IN/OUT/NOW/FPS on camera cards)
+const LIVE_DETECTION_REFRESH_INTERVAL = 5000; // ms (metrics + events)
 
 // KIU campus camera zones
 const CAMERA_COORDS = {
@@ -840,17 +842,76 @@ async function loadCameraFeeds() {
       return aLive - bLive;
     });
 
-    grid.innerHTML = orderedCameras.map(c => _renderCameraCard(c)).join('');
+    const cards = Array.from(grid.querySelectorAll('.camera-card'));
+    const renderedIds = cards.map(card => card.id.replace('card-', ''));
+    const expectedIds = orderedCameras.map(c => c.camera_id);
+    const needsRender =
+      cards.length === 0 ||
+      renderedIds.length !== expectedIds.length ||
+      renderedIds.some((id, idx) => id !== expectedIds[idx]);
 
-    // Wire up image error → offline state
-    grid.querySelectorAll('.cam-feed-img').forEach(img => {
-      img.onerror = () => {
-        img.style.display = 'none';
-        img.nextElementSibling.style.display = 'flex';
-      };
-    });
+    if (needsRender) {
+      grid.innerHTML = orderedCameras.map(c => _renderCameraCard(c)).join('');
+
+      // Wire up image error → offline state
+      grid.querySelectorAll('.cam-feed-img').forEach(img => {
+        img.onerror = () => {
+          img.style.display = 'none';
+          if (img.nextElementSibling) img.nextElementSibling.style.display = 'flex';
+        };
+      });
+    }
+
+    // Real-time values update without recreating stream elements.
+    orderedCameras.forEach(c => _updateCameraCard(c));
   } catch (_) {
     grid.innerHTML = `<div class="state-box"><i class="fas fa-plug-circle-xmark"></i><p>Python API unreachable. Start with: <code>uvicorn api_server:app --port 8000</code></p></div>`;
+  }
+}
+
+function _toOneDecimal(n) {
+  const v = Number(n);
+  return Number.isFinite(v) ? v.toFixed(1) : '0.0';
+}
+
+function _updateCameraCard(c) {
+  const card = document.getElementById(`card-${c.camera_id}`);
+  if (!card) return;
+
+  const streamUrl = `${PYTHON_API}/stream/${c.camera_id}`;
+  const isRunning = !!c.running;
+
+  const badge = card.querySelector('.cam-badge');
+  if (badge) {
+    badge.className = `cam-badge ${isRunning ? 'live' : 'off'}`;
+    badge.innerHTML = isRunning ? '<span class="dot"></span> LIVE' : 'OFFLINE';
+  }
+
+  const img = card.querySelector('.cam-feed-img');
+  const offline = card.querySelector('.feed-offline');
+  if (img && offline) {
+    if (isRunning) {
+      if (!img.getAttribute('src')) img.setAttribute('src', streamUrl);
+      img.style.display = '';
+      offline.style.display = 'none';
+    } else {
+      img.style.display = 'none';
+      offline.style.display = 'flex';
+    }
+  }
+
+  const inEl = card.querySelector('[data-field="count_in"]');
+  const outEl = card.querySelector('[data-field="count_out"]');
+  const nowEl = card.querySelector('[data-field="current_count"]');
+  const fpsEl = card.querySelector('[data-field="fps"]');
+  if (inEl) inEl.textContent = `${c.count_in ?? 0}`;
+  if (outEl) outEl.textContent = `${c.count_out ?? 0}`;
+  if (nowEl) nowEl.textContent = `${c.current_count ?? 0}`;
+  if (fpsEl) fpsEl.textContent = _toOneDecimal(c.fps);
+
+  const sessionEl = card.querySelector('.session-time');
+  if (sessionEl) {
+    sessionEl.textContent = c.session_start ? c.session_start.slice(0, 19).replace('T', ' ') : '—';
   }
 }
 
@@ -880,24 +941,24 @@ function _renderCameraCard(c) {
       <div class="camera-stats">
         <div class="cam-stat">
           <div class="cam-stat-label">IN</div>
-          <div class="cam-stat-value in">${c.count_in}</div>
+          <div class="cam-stat-value in" data-field="count_in">${c.count_in ?? 0}</div>
         </div>
         <div class="cam-stat">
           <div class="cam-stat-label">OUT</div>
-          <div class="cam-stat-value out">${c.count_out}</div>
+          <div class="cam-stat-value out" data-field="count_out">${c.count_out ?? 0}</div>
         </div>
         <div class="cam-stat">
           <div class="cam-stat-label">NOW</div>
-          <div class="cam-stat-value now">${c.current_count}</div>
+          <div class="cam-stat-value now" data-field="current_count">${c.current_count ?? 0}</div>
         </div>
         <div class="cam-stat">
           <div class="cam-stat-label">FPS</div>
-          <div class="cam-stat-value fps">${c.fps.toFixed(1)}</div>
+          <div class="cam-stat-value fps" data-field="fps">${_toOneDecimal(c.fps)}</div>
         </div>
       </div>
       <div class="camera-footer">
         <span style="font-size:11px;color:var(--muted)">
-          <i class="fas fa-clock"></i> Session: ${c.session_start ? c.session_start.slice(0,19).replace('T',' ') : '—'}
+          <i class="fas fa-clock"></i> Session: <span class="session-time">${c.session_start ? c.session_start.slice(0,19).replace('T',' ') : '—'}</span>
         </span>
         <button class="btn-sm secondary" style="margin-left:auto"
                 onclick="resetCameracounts('${c.camera_id}')">
@@ -960,8 +1021,18 @@ async function loadCrossingEvents() {
 
 // Auto-refresh Live Detection when it's the active section
 setInterval(() => {
-  if (currentSection === 'live-detection') loadDetectionData();
-}, 5000);
+  if (currentSection === 'live-detection') {
+    // Fast lane: update camera card IN / OUT / NOW / FPS every second.
+    loadCameraFeeds();
+  }
+}, LIVE_CAMERA_STATS_INTERVAL);
+
+setInterval(() => {
+  if (currentSection === 'live-detection') {
+    // Slow lane: heavier requests at 5s cadence.
+    Promise.all([loadDetectionMetrics(), loadCrossingEvents()]);
+  }
+}, LIVE_DETECTION_REFRESH_INTERVAL);
 
 // ── Initialise ───────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
