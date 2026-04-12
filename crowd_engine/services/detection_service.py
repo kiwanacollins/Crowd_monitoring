@@ -51,7 +51,7 @@ _WEBCAM_WIDTH      = 640
 _WEBCAM_HEIGHT     = 480
 _RENDER_FPS        = 25.0  # target FPS for the MJPEG render thread
 _YOLO_IMGSZ        = 416   # inference input size — 35% faster than 640 on CPU
-_YOLO_CONF         = 0.30  # confidence threshold (lower = higher recall)
+_YOLO_CONF         = 0.25  # confidence threshold (lower = catches more people)
 _YOLO_IOU          = 0.45  # NMS IOU threshold
 _FRAME_SKIP_MAX    = 8     # max frames to skip per cycle when catching up to real-time
 
@@ -206,31 +206,78 @@ class _CameraWorker:
                     self.camera_id,
                 )
 
-        # ── Shared state: inference writes, render reads ────────────────────
-        # Latest raw frame stored by inference loop, read by render thread
-        _raw:  List[Optional[np.ndarray]] = [None]
-        _raw_lock = threading.Lock()
-        # Latest tracked objects: [{x1, y1, x2, y2, tid, conf}]
+        # ── Shared state (3 threads: capture → buffer ← render + inference) ─
+        # Captured frame — written by capture thread at source FPS
+        _cap_frame:  List[Optional[np.ndarray]] = [None]
+        _cap_lock    = threading.Lock()
+        _cap_seq:    List[int] = [0]
+
+        # Tracked objects from last YOLO/HOG run
         _objs: List[list] = [[]]
         _objs_lock = threading.Lock()
 
-        # ── Render thread: smooth MJPEG at up to 25 FPS ────────────────────
-        _render_interval = 1.0 / min(_RENDER_FPS, src_fps)
+        # ── Capture thread: reads source at native FPS ──────────────────────
+        _cap_interval = 1.0 / src_fps
 
-        def render_loop() -> None:
+        def capture_loop() -> None:
+            frame_idx   = 0
+            session_t   = time.monotonic()
+
             while self._running:
                 t0 = time.monotonic()
 
-                with _raw_lock:
-                    raw = _raw[0]
-                if raw is None:
-                    time.sleep(0.02)
+                # Video files: skip stale frames to keep wall-clock pace
+                if not is_live:
+                    elapsed_wall = time.monotonic() - session_t
+                    expected_idx = int(elapsed_wall * src_fps)
+                    skip = min(expected_idx - frame_idx, _FRAME_SKIP_MAX)
+                    for _ in range(max(0, skip - 1)):
+                        if not cap.grab():
+                            break
+                        frame_idx += 1
+
+                ret, frame = cap.read()
+                if not ret:
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                    frame_idx = 0
+                    session_t = time.monotonic()
+                    time.sleep(0.03)
                     continue
+
+                frame_idx += 1
+                with _cap_lock:
+                    _cap_frame[0] = frame
+                    _cap_seq[0]  += 1
+
+                # Pace video files to source FPS; webcams self-pace
+                if not is_live:
+                    sleep_t = _cap_interval - (time.monotonic() - t0)
+                    if sleep_t > 0:
+                        time.sleep(sleep_t)
+
+        threading.Thread(
+            target=capture_loop, daemon=True, name=f"cap-{self.camera_id}"
+        ).start()
+
+        # ── Render thread: smooth MJPEG at source FPS ───────────────────────
+        _render_interval = 1.0 / min(_RENDER_FPS, src_fps)
+
+        def render_loop() -> None:
+            last_seq = -1
+            while self._running:
+                t0 = time.monotonic()
+
+                with _cap_lock:
+                    raw = _cap_frame[0]
+                    seq = _cap_seq[0]
+                if raw is None or seq == last_seq:
+                    time.sleep(0.005)
+                    continue
+                last_seq = seq
 
                 frame = raw.copy()
                 h, w = frame.shape[:2]
 
-                # Overlay last known detections (temporal persistence between YOLO runs)
                 with _objs_lock:
                     objs = list(_objs[0])
                 for obj in objs:
@@ -264,41 +311,24 @@ class _CameraWorker:
                 if sleep_t > 0:
                     time.sleep(sleep_t)
 
-        render_thread = threading.Thread(
+        threading.Thread(
             target=render_loop, daemon=True, name=f"rnd-{self.camera_id}"
-        )
-        render_thread.start()
+        ).start()
 
-        # ── Inference loop ──────────────────────────────────────────────────
-        frame_count = 0
-        fps_t       = time.monotonic()
-        frame_idx   = 0
-        session_t   = time.monotonic()
+        # ── Inference loop (this thread) ────────────────────────────────────
+        frame_count  = 0
+        fps_t        = time.monotonic()
+        last_inf_seq = -1
 
         while self._running:
-            # For video files: skip stale frames so playback stays real-time.
-            if not is_live:
-                elapsed_wall = time.monotonic() - session_t
-                expected_idx = int(elapsed_wall * src_fps)
-                skip = min(expected_idx - frame_idx, _FRAME_SKIP_MAX)
-                for _ in range(max(0, skip - 1)):
-                    if not cap.grab():
-                        break
-                    frame_idx += 1
-
-            ret, frame = cap.read()
-            if not ret:
-                cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                frame_idx = 0
-                session_t = time.monotonic()
-                time.sleep(0.03)
+            # Grab latest captured frame; skip if unchanged since last run
+            with _cap_lock:
+                frame = _cap_frame[0]
+                seq   = _cap_seq[0]
+            if frame is None or seq == last_inf_seq:
+                time.sleep(0.005)
                 continue
-
-            frame_idx += 1
-
-            # Share raw frame with render thread
-            with _raw_lock:
-                _raw[0] = frame
+            last_inf_seq = seq
 
             h, w = frame.shape[:2]
             curr_centroids: Dict[int, Tuple[int, int]] = {}
