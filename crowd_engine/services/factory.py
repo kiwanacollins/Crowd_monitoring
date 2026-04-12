@@ -14,6 +14,7 @@ from crowd_engine.services.orchestrator import FallbackOrchestrator
 log = get_logger(__name__)
 
 _PROVIDER_REGISTRY = {
+    "yolov8": "crowd_engine.providers.yolo_provider:YOLOv8Provider",
     "roboflow": "crowd_engine.providers.roboflow_provider:RoboflowProvider",
     "huggingface": "crowd_engine.providers.huggingface_provider:HuggingFaceProvider",
     "geospatial": "crowd_engine.providers.geospatial_provider:GeospatialProvider",

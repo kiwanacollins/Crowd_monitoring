@@ -1,16 +1,17 @@
 [
-    {
-        "source": "http://192.168.1.2:8080/video",
-        "coordinates": {
-            "latitude": 18.5304,
-            "longitude": 73.8567
-        }
-    },
-    {
-        "source": "http://192.168.1.3:8080/video",
-        "coordinates": {
-            "latitude": 18.5504,
-            "longitude": 73.8767
-        }
-    }
+  {
+    "camera_id": "kiu-main-entrance",
+    "source": "crowd.mp4",
+    "label": "KIU Main Entrance",
+    "coordinates": { "latitude": 0.2858, "longitude": 32.5734 },
+    "counting_line": { "x1": 0.0, "y1": 0.5, "x2": 1.0, "y2": 0.5 }
+  },
+  {
+    "camera_id": "kiu-library",
+    "source": "crowd2.mp4",
+    "label": "KIU Library Block",
+    "coordinates": { "latitude": 0.2861, "longitude": 32.5738 },
+    "counting_line": { "x1": 0.0, "y1": 0.45, "x2": 1.0, "y2": 0.45 }
+  }
 ]
+

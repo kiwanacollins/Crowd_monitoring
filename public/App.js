@@ -74,14 +74,15 @@ function pushToChart(chart, label, values) {
 
 // ── Navigation ───────────────────────────────────────────────
 const SECTION_TITLES = {
-  'overview':  'Overview',
-  'live-map':  'Live Map',
-  'shops':     'Shops & Locations',
-  'analytics': 'Trends & Charts',
-  'top-shops': 'Top Locations',
-  'heatmap':   'Heatmap Data',
-  'history':   'History',
-  'health':    'System Health',
+  'overview':       'Overview',
+  'live-detection': 'Live Detection',
+  'live-map':       'Live Map',
+  'shops':          'Shops',
+  'analytics':      'Trends & Charts',
+  'top-shops':      'Top Locations',
+  'heatmap':        'Heatmap Data',
+  'history':        'History',
+  'health':         'System Health',
 };
 
 let currentSection = 'overview';
@@ -97,10 +98,11 @@ function navigate(section) {
   currentSection = section;
   closeSidebar();
   // Lazy load section data
-  if (section === 'shops')     loadShops();
-  if (section === 'top-shops') loadTopShops();
-  if (section === 'heatmap')   loadHeatmap();
-  if (section === 'health')    loadHealth();
+  if (section === 'shops')          loadShops();
+  if (section === 'top-shops')      loadTopShops();
+  if (section === 'heatmap')        loadHeatmap();
+  if (section === 'health')         loadHealth();
+  if (section === 'live-detection') loadDetectionData();
 }
 
 function toggleSidebar() {
@@ -780,11 +782,162 @@ function renderHealthRows(rows) {
 // ── Global refresh ───────────────────────────────────────────
 function refreshAll() {
   fetchCrowdData();
-  if (currentSection === 'shops')     loadShops();
-  if (currentSection === 'top-shops') loadTopShops();
-  if (currentSection === 'heatmap')   loadHeatmap();
-  if (currentSection === 'health')    loadHealth();
+  if (currentSection === 'shops')          loadShops();
+  if (currentSection === 'top-shops')      loadTopShops();
+  if (currentSection === 'heatmap')        loadHeatmap();
+  if (currentSection === 'health')         loadHealth();
+  if (currentSection === 'live-detection') loadDetectionData();
 }
+
+// ── Live Detection ───────────────────────────────────────────
+let _detectionPollTimer = null;
+
+async function loadDetectionData() {
+  await Promise.all([loadCameraFeeds(), loadDetectionMetrics(), loadCrossingEvents()]);
+}
+
+async function loadDetectionMetrics() {
+  try {
+    const m = await fetch(`${PYTHON_API}/api/v1/metrics`).then(r => r.json());
+    document.getElementById('metCameras').textContent   = m.cameras_active ?? '—';
+    document.getElementById('metTotalIn').textContent   = m.total_in ?? '—';
+    document.getElementById('metTotalOut').textContent  = m.total_out ?? '—';
+    document.getElementById('metOccupancy').textContent = m.net_occupancy ?? '—';
+    document.getElementById('metFps').textContent       = (m.avg_fps ?? '—') + (m.avg_fps != null ? ' fps' : '');
+  } catch (_) {
+    ['metCameras','metTotalIn','metTotalOut','metOccupancy','metFps']
+      .forEach(id => document.getElementById(id).textContent = '—');
+  }
+}
+
+async function loadCameraFeeds() {
+  const grid = document.getElementById('cameraGrid');
+  try {
+    const cameras = await fetch(`${PYTHON_API}/api/v1/cameras`).then(r => r.json());
+    if (!cameras.length) {
+      grid.innerHTML = `<div class="state-box"><i class="fas fa-camera-slash"></i><p>No cameras configured. Check cameras.json and restart the Python API.</p></div>`;
+      return;
+    }
+    grid.innerHTML = cameras.map(c => _renderCameraCard(c)).join('');
+
+    // Wire up image error → offline state
+    grid.querySelectorAll('.cam-feed-img').forEach(img => {
+      img.onerror = () => {
+        img.style.display = 'none';
+        img.nextElementSibling.style.display = 'flex';
+      };
+    });
+  } catch (_) {
+    grid.innerHTML = `<div class="state-box"><i class="fas fa-plug-circle-xmark"></i><p>Python API unreachable. Start with: <code>uvicorn api_server:app --port 8000</code></p></div>`;
+  }
+}
+
+function _renderCameraCard(c) {
+  const streamUrl = `${PYTHON_API}/stream/${c.camera_id}`;
+  const isRunning = c.running;
+  return `
+    <div class="camera-card" id="card-${c.camera_id}">
+      <div class="camera-card-header">
+        <i class="fas fa-video" style="color:var(--accent)"></i>
+        <h3>${c.label}</h3>
+        <span class="cam-badge ${isRunning ? 'live' : 'off'}">
+          ${isRunning ? '<span class="dot"></span> LIVE' : 'OFFLINE'}
+        </span>
+      </div>
+      <div class="camera-feed">
+        <img class="cam-feed-img"
+             src="${isRunning ? streamUrl : ''}"
+             alt="${c.label} stream"
+             style="${isRunning ? '' : 'display:none'}">
+        <div class="feed-offline" style="${isRunning ? 'display:none' : ''}">
+          <i class="fas fa-video-slash" style="font-size:32px"></i>
+          <span>Camera offline</span>
+        </div>
+      </div>
+      <div class="camera-stats">
+        <div class="cam-stat">
+          <div class="cam-stat-label">IN</div>
+          <div class="cam-stat-value in">${c.count_in}</div>
+        </div>
+        <div class="cam-stat">
+          <div class="cam-stat-label">OUT</div>
+          <div class="cam-stat-value out">${c.count_out}</div>
+        </div>
+        <div class="cam-stat">
+          <div class="cam-stat-label">NOW</div>
+          <div class="cam-stat-value now">${c.current_count}</div>
+        </div>
+        <div class="cam-stat">
+          <div class="cam-stat-label">FPS</div>
+          <div class="cam-stat-value fps">${c.fps.toFixed(1)}</div>
+        </div>
+      </div>
+      <div class="camera-footer">
+        <span style="font-size:11px;color:var(--muted)">
+          <i class="fas fa-clock"></i> Session: ${c.session_start ? c.session_start.slice(0,19).replace('T',' ') : '—'}
+        </span>
+        <button class="btn-sm secondary" style="margin-left:auto"
+                onclick="resetCameracounts('${c.camera_id}')">
+          <i class="fas fa-arrow-rotate-left"></i> Reset
+        </button>
+      </div>
+    </div>`;
+}
+
+async function resetCameracounts(cameraId) {
+  try {
+    await fetch(`${PYTHON_API}/api/v1/cameras/${cameraId}/reset`, { method: 'POST' });
+    loadDetectionData();
+  } catch (e) {
+    alert('Could not reset — is the Python API running?');
+  }
+}
+
+async function loadCrossingEvents() {
+  const container = document.getElementById('eventsTableContainer');
+  const countEl   = document.getElementById('eventCount');
+  try {
+    const events = await fetch(`${PYTHON_API}/api/v1/cameras/events?limit=50`)
+      .then(r => r.json()).catch(async () => {
+        // Fallback: fetch from each camera individually
+        const cameras = await fetch(`${PYTHON_API}/api/v1/cameras`).then(r => r.json());
+        const all = await Promise.all(
+          cameras.map(c => fetch(`${PYTHON_API}/api/v1/cameras/${c.camera_id}/events?limit=20`).then(r => r.json()).catch(() => []))
+        );
+        return all.flat().sort((a,b) => b.timestamp.localeCompare(a.timestamp)).slice(0,50);
+      });
+
+    countEl.textContent = `${events.length} event${events.length !== 1 ? 's' : ''}`;
+    if (!events.length) {
+      container.innerHTML = `<div class="state-box"><i class="fas fa-arrow-right-arrow-left"></i><p>No crossing events yet.</p></div>`;
+      return;
+    }
+    container.innerHTML = `
+      <table>
+        <thead><tr><th>Camera</th><th>Track ID</th><th>Direction</th><th>Time</th></tr></thead>
+        <tbody>
+          ${events.map(e => `
+            <tr>
+              <td>${e.camera_id}</td>
+              <td>#${e.track_id}</td>
+              <td>
+                <span class="badge ${e.direction === 'in' ? 'green' : 'red'}">
+                  ${e.direction === 'in' ? '→ IN' : '← OUT'}
+                </span>
+              </td>
+              <td style="color:var(--muted);font-size:12px">${e.timestamp.slice(0,19).replace('T',' ')}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>`;
+  } catch (_) {
+    container.innerHTML = `<div class="state-box"><i class="fas fa-plug-circle-xmark"></i><p>Python API unreachable.</p></div>`;
+  }
+}
+
+// Auto-refresh Live Detection when it's the active section
+setInterval(() => {
+  if (currentSection === 'live-detection') loadDetectionData();
+}, 3000);
 
 // ── Initialise ───────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {

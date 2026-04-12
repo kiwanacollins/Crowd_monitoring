@@ -59,11 +59,11 @@ class Settings:
     api_secret_key: str = field(default_factory=lambda: _env("API_SECRET_KEY", "changeme-in-production"))
 
     # ── Provider chain ─────────────────────────────────────────────────────
-    # Comma-separated ordered list.  Available: roboflow, huggingface, geospatial, opencv
+    # Comma-separated ordered list.  Available: yolov8, roboflow, huggingface, geospatial, opencv
     provider_chain: List[str] = field(
         default_factory=lambda: [
             p.strip()
-            for p in _env("PROVIDER_CHAIN", "roboflow,huggingface,geospatial,opencv").split(",")
+            for p in _env("PROVIDER_CHAIN", "yolov8,roboflow,opencv").split(",")
             if p.strip()
         ]
     )

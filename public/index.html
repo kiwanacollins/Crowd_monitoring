@@ -133,6 +133,27 @@
       .history-controls { flex-direction: column; }
       .form-group { min-width: 100%; }
     }
+    /* ── Live Detection styles ─────────────────────────────── */
+    .camera-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
+    .camera-card-header { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+    .camera-card-header h3 { font-size: 14px; font-weight: 600; flex: 1; }
+    .cam-badge { display: flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 20px; }
+    .cam-badge.live  { background: rgba(34,197,94,0.15); color: var(--success); }
+    .cam-badge.off   { background: var(--surface2); color: var(--muted); }
+    .camera-feed { position: relative; background: #000; }
+    .camera-feed img { width: 100%; display: block; min-height: 240px; object-fit: cover; }
+    .feed-offline { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 240px; color: var(--muted); gap: 10px; font-size: 13px; }
+    .camera-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; border-top: 1px solid var(--border); }
+    .cam-stat { padding: 10px 8px; text-align: center; border-right: 1px solid var(--border); }
+    .cam-stat:last-child { border-right: none; }
+    .cam-stat-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; }
+    .cam-stat-value { font-size: 20px; font-weight: 700; margin-top: 2px; }
+    .cam-stat-value.in  { color: var(--success); }
+    .cam-stat-value.out { color: var(--danger); }
+    .cam-stat-value.now { color: var(--accent); }
+    .cam-stat-value.fps { color: var(--warning); }
+    .camera-footer { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-top: 1px solid var(--border); }
+    .camera-footer button { font-size: 12px; }
   </style>
 </head>
 <body>
@@ -147,6 +168,9 @@
         <div class="nav-section-label">Main</div>
         <div class="nav-item active" data-section="overview" onclick="navigate('overview')">
           <i class="fas fa-gauge-high"></i> Overview
+        </div>
+        <div class="nav-item" data-section="live-detection" onclick="navigate('live-detection')">
+          <i class="fas fa-camera"></i> Live Detection
         </div>
         <div class="nav-item" data-section="live-map" onclick="navigate('live-map')">
           <i class="fas fa-map-location-dot"></i> Live Map
@@ -259,6 +283,62 @@
             </div>
             <div id="recentTableContainer">
               <div class="state-box"><div class="spinner"></div><p>Loading…</p></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- LIVE DETECTION -->
+        <section class="section" id="sec-live-detection">
+          <div class="section-header">
+            <h2>Live Detection</h2>
+            <p>Real-time YOLOv8 + ByteTrack person detection with virtual counting lines. Requires the Python API on port 8000.</p>
+          </div>
+
+          <!-- System metrics bar -->
+          <div class="cards-row" id="detMetricsRow">
+            <div class="card">
+              <div class="card-icon blue"><i class="fas fa-camera"></i></div>
+              <div class="card-label">Active Cameras</div>
+              <div class="card-value" id="metCameras">—</div>
+            </div>
+            <div class="card">
+              <div class="card-icon green"><i class="fas fa-right-to-bracket"></i></div>
+              <div class="card-label">Total IN</div>
+              <div class="card-value" id="metTotalIn">—</div>
+            </div>
+            <div class="card">
+              <div class="card-icon red"><i class="fas fa-right-from-bracket"></i></div>
+              <div class="card-label">Total OUT</div>
+              <div class="card-value" id="metTotalOut">—</div>
+            </div>
+            <div class="card">
+              <div class="card-icon purple"><i class="fas fa-users"></i></div>
+              <div class="card-label">Net Occupancy</div>
+              <div class="card-value" id="metOccupancy">—</div>
+            </div>
+            <div class="card">
+              <div class="card-icon amber"><i class="fas fa-gauge"></i></div>
+              <div class="card-label">Avg FPS</div>
+              <div class="card-value" id="metFps">—</div>
+            </div>
+          </div>
+
+          <!-- Camera feed grid -->
+          <div id="cameraGrid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(440px,1fr));gap:20px;margin-bottom:24px">
+            <div class="state-box"><div class="spinner"></div><p>Loading camera feeds…</p></div>
+          </div>
+
+          <!-- Crossing events table -->
+          <div class="table-wrap">
+            <div class="table-toolbar">
+              <h3><i class="fas fa-list-check" style="margin-right:6px;color:var(--accent)"></i>Crossing Events</h3>
+              <span class="badge blue" id="eventCount">0 events</span>
+              <button class="btn-sm secondary" style="margin-left:auto" onclick="loadDetectionData()">
+                <i class="fas fa-rotate-right"></i> Refresh
+              </button>
+            </div>
+            <div id="eventsTableContainer">
+              <div class="state-box"><i class="fas fa-arrow-right-arrow-left"></i><p>No events yet. Detection starts when the Python API is running.</p></div>
             </div>
           </div>
         </section>
