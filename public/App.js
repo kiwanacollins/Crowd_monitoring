@@ -912,15 +912,16 @@ async function loadCrossingEvents() {
   const container = document.getElementById('eventsTableContainer');
   const countEl   = document.getElementById('eventCount');
   try {
-    const events = await fetch(`${PYTHON_API}/api/v1/cameras/events?limit=50`)
-      .then(r => r.json()).catch(async () => {
-        // Fallback: fetch from each camera individually
-        const cameras = await fetch(`${PYTHON_API}/api/v1/cameras`).then(r => r.json());
-        const all = await Promise.all(
-          cameras.map(c => fetch(`${PYTHON_API}/api/v1/cameras/${c.camera_id}/events?limit=20`).then(r => r.json()).catch(() => []))
-        );
-        return all.flat().sort((a,b) => b.timestamp.localeCompare(a.timestamp)).slice(0,50);
-      });
+    // Fetch per-camera events and merge
+    const cameras = await apiFetch(`${PYTHON_API}/api/v1/cameras`).catch(() => []);
+    const all = await Promise.all(
+      cameras.map(c =>
+        apiFetch(`${PYTHON_API}/api/v1/cameras/${c.camera_id}/events?limit=20`).catch(() => [])
+      )
+    );
+    const events = all.flat()
+      .sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || ''))
+      .slice(0, 50);
 
     countEl.textContent = `${events.length} event${events.length !== 1 ? 's' : ''}`;
     if (!events.length) {
@@ -952,7 +953,7 @@ async function loadCrossingEvents() {
 // Auto-refresh Live Detection when it's the active section
 setInterval(() => {
   if (currentSection === 'live-detection') loadDetectionData();
-}, 3000);
+}, 5000);
 
 // ── Initialise ───────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {

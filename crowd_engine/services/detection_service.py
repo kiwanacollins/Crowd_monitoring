@@ -165,6 +165,25 @@ class _CameraWorker:
 
         log.info("Camera %s started — %s", self.camera_id, src)
 
+        # macOS permission warm-up: try a few frames before processing
+        # Permission denied = ret=False OR all-black frames
+        if isinstance(src, int):
+            import numpy as np
+            fail_count = 0
+            for _ in range(5):
+                ret, test_frame = cap.read()
+                if not ret or test_frame is None:
+                    fail_count += 1
+                elif np.mean(test_frame) < 2.0:
+                    fail_count += 1
+                time.sleep(0.1)
+            if fail_count >= 4:
+                log.warning(
+                    "Camera %s: no usable frames during warm-up (permission denied?) — "
+                    "macOS: System Settings → Privacy & Security → Camera → enable Terminal.",
+                    self.camera_id,
+                )
+
         frame_count = 0
         fps_t = time.monotonic()
 

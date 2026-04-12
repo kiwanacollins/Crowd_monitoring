@@ -115,7 +115,7 @@ class Settings:
 
     # ── Rate limiting ──────────────────────────────────────────────────────
     rate_limit_per_minute: int = field(
-        default_factory=lambda: _env_int("RATE_LIMIT_PER_MINUTE", 60)
+        default_factory=lambda: _env_int("RATE_LIMIT_PER_MINUTE", 300)
     )
 
 
