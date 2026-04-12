@@ -43,12 +43,17 @@ _C_IN   = (50,  220,  50)   # green      — "IN" label
 _C_OUT  = (50,   50, 220)   # red        — "OUT" label
 _C_TEXT = (255, 255, 255)   # white      — HUD text
 
-_JPEG_QUALITY = 75          # balance quality vs. stream bandwidth
-_MAX_EVENTS   = 2000        # in-memory event buffer size
-_HOG_DETECT_INTERVAL = 4    # run expensive HOG every N frames in fallback mode
-_HOG_MAX_WIDTH = 640        # downscale fallback detection input for speed
-_WEBCAM_WIDTH = 640
-_WEBCAM_HEIGHT = 480
+_JPEG_QUALITY      = 80     # slightly higher quality for smoother stream appearance
+_MAX_EVENTS        = 2000   # in-memory event buffer size
+_HOG_DETECT_INTERVAL = 4   # run expensive HOG every N frames in fallback mode
+_HOG_MAX_WIDTH     = 640   # downscale fallback detection input for speed
+_WEBCAM_WIDTH      = 640
+_WEBCAM_HEIGHT     = 480
+_RENDER_FPS        = 25.0  # target FPS for the MJPEG render thread
+_YOLO_IMGSZ        = 416   # inference input size — 35% faster than 640 on CPU
+_YOLO_CONF         = 0.30  # confidence threshold (lower = higher recall)
+_YOLO_IOU          = 0.45  # NMS IOU threshold
+_FRAME_SKIP_MAX    = 8     # max frames to skip per cycle when catching up to real-time
 
 
 # ── Data classes ───────────────────────────────────────────────────────────
@@ -156,11 +161,9 @@ class _CameraWorker:
             model = YOLO("yolov8n.pt")
             log.info("Camera %s using YOLOv8 detector", self.camera_id)
         except Exception as exc:
-            # Python 3.13 often lacks torch wheels; keep stream alive with HOG fallback.
             log.warning(
                 "Camera %s falling back to OpenCV HOG detector (YOLO unavailable: %s)",
-                self.camera_id,
-                exc,
+                self.camera_id, exc,
             )
             hog = cv2.HOGDescriptor()
             hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
@@ -169,6 +172,7 @@ class _CameraWorker:
         src: Any = self.source
         if isinstance(src, str) and src.isdigit():
             src = int(src)
+        is_live = isinstance(src, int)
 
         cap = cv2.VideoCapture(src)
         if not cap.isOpened():
@@ -176,60 +180,144 @@ class _CameraWorker:
             self._running = False
             return
 
-        # Keep capture latency low and reduce webcam decode work.
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        if isinstance(src, int):
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, _WEBCAM_WIDTH)
+        if is_live:
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH,  _WEBCAM_WIDTH)
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, _WEBCAM_HEIGHT)
 
-        log.info("Camera %s started — %s", self.camera_id, src)
+        src_fps = cap.get(cv2.CAP_PROP_FPS)
+        if not src_fps or src_fps < 1 or src_fps > 120:
+            src_fps = 25.0
 
-        # macOS permission warm-up: try a few frames before processing
-        # Permission denied = ret=False OR all-black frames
-        if isinstance(src, int):
-            import numpy as np
+        log.info("Camera %s started — %s (source %.1f FPS)", self.camera_id, src, src_fps)
+
+        # macOS permission warm-up for live cameras
+        if is_live:
             fail_count = 0
             for _ in range(5):
                 ret, test_frame = cap.read()
-                if not ret or test_frame is None:
-                    fail_count += 1
-                elif np.mean(test_frame) < 2.0:
+                if not ret or test_frame is None or np.mean(test_frame) < 2.0:
                     fail_count += 1
                 time.sleep(0.1)
             if fail_count >= 4:
                 log.warning(
-                    "Camera %s: no usable frames during warm-up (permission denied?) — "
+                    "Camera %s: no usable frames during warm-up — "
                     "macOS: System Settings → Privacy & Security → Camera → enable Terminal.",
                     self.camera_id,
                 )
 
+        # ── Shared state: inference writes, render reads ────────────────────
+        # Latest raw frame stored by inference loop, read by render thread
+        _raw:  List[Optional[np.ndarray]] = [None]
+        _raw_lock = threading.Lock()
+        # Latest tracked objects: [{x1, y1, x2, y2, tid, conf}]
+        _objs: List[list] = [[]]
+        _objs_lock = threading.Lock()
+
+        # ── Render thread: smooth MJPEG at up to 25 FPS ────────────────────
+        _render_interval = 1.0 / min(_RENDER_FPS, src_fps)
+
+        def render_loop() -> None:
+            while self._running:
+                t0 = time.monotonic()
+
+                with _raw_lock:
+                    raw = _raw[0]
+                if raw is None:
+                    time.sleep(0.02)
+                    continue
+
+                frame = raw.copy()
+                h, w = frame.shape[:2]
+
+                # Overlay last known detections (temporal persistence between YOLO runs)
+                with _objs_lock:
+                    objs = list(_objs[0])
+                for obj in objs:
+                    x1, y1, x2, y2 = obj["x1"], obj["y1"], obj["x2"], obj["y2"]
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), _C_BOX, 2)
+                    cv2.putText(
+                        frame, f"#{obj['tid']} {obj['conf']:.2f}",
+                        (x1, max(14, y1 - 6)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, _C_BOX, 2,
+                    )
+
+                if self.line:
+                    lx1, ly1, lx2, ly2 = self.line.to_pixels(w, h)
+                    cv2.line(frame, (lx1, ly1), (lx2, ly2), _C_LINE, 2)
+                    cv2.putText(frame, "IN",  (lx1 + 4,  ly1 - 6),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.55, _C_IN,  2)
+                    cv2.putText(frame, "OUT", (lx2 - 40, ly2 - 6),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.55, _C_OUT, 2)
+
+                _draw_hud(frame, w, self.label, self.count_in,
+                          self.count_out, self.current_count, self.fps)
+
+                ok, jpeg = cv2.imencode(
+                    ".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, _JPEG_QUALITY]
+                )
+                if ok:
+                    with self._frame_lock:
+                        self._latest_jpeg = jpeg.tobytes()
+
+                sleep_t = _render_interval - (time.monotonic() - t0)
+                if sleep_t > 0:
+                    time.sleep(sleep_t)
+
+        render_thread = threading.Thread(
+            target=render_loop, daemon=True, name=f"rnd-{self.camera_id}"
+        )
+        render_thread.start()
+
+        # ── Inference loop ──────────────────────────────────────────────────
         frame_count = 0
-        fps_t = time.monotonic()
+        fps_t       = time.monotonic()
+        frame_idx   = 0
+        session_t   = time.monotonic()
 
         while self._running:
+            # For video files: skip stale frames so playback stays real-time.
+            if not is_live:
+                elapsed_wall = time.monotonic() - session_t
+                expected_idx = int(elapsed_wall * src_fps)
+                skip = min(expected_idx - frame_idx, _FRAME_SKIP_MAX)
+                for _ in range(max(0, skip - 1)):
+                    if not cap.grab():
+                        break
+                    frame_idx += 1
+
             ret, frame = cap.read()
             if not ret:
-                # Loop video files back to start
                 cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                frame_idx = 0
+                session_t = time.monotonic()
                 time.sleep(0.03)
                 continue
 
-            h, w = frame.shape[:2]
+            frame_idx += 1
 
+            # Share raw frame with render thread
+            with _raw_lock:
+                _raw[0] = frame
+
+            h, w = frame.shape[:2]
             curr_centroids: Dict[int, Tuple[int, int]] = {}
             self.current_count = 0
+            new_objs: list = []
 
-            # ── Detector path: YOLOv8 (preferred) or OpenCV HOG fallback ──
+            # ── YOLOv8 + ByteTrack ─────────────────────────────────────────
             if model is not None:
                 results = model.track(
                     frame,
                     persist=True,
-                    classes=[0],        # person only
+                    classes=[0],
+                    conf=_YOLO_CONF,
+                    iou=_YOLO_IOU,
+                    imgsz=_YOLO_IMGSZ,
                     verbose=False,
                     tracker="bytetrack.yaml",
                 )
                 boxes = results[0].boxes
-
                 if boxes is not None and boxes.id is not None:
                     self.current_count = len(boxes)
                     for xyxy, tid, conf in zip(
@@ -239,15 +327,13 @@ class _CameraWorker:
                     ):
                         track_id = int(tid)
                         x1, y1, x2, y2 = map(int, xyxy)
-                        cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
-                        curr_centroids[track_id] = (cx, cy)
+                        curr_centroids[track_id] = ((x1 + x2) // 2, (y1 + y2) // 2)
+                        new_objs.append({
+                            "x1": x1, "y1": y1, "x2": x2, "y2": y2,
+                            "tid": track_id, "conf": float(conf),
+                        })
 
-                        cv2.rectangle(frame, (x1, y1), (x2, y2), _C_BOX, 2)
-                        label_txt = f"#{track_id} {conf:.2f}"
-                        cv2.putText(
-                            frame, label_txt, (x1, y1 - 6),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, _C_BOX, 2,
-                        )
+            # ── OpenCV HOG fallback ────────────────────────────────────────
             elif hog is not None:
                 hog_frame_idx += 1
                 if hog_frame_idx == 1 or hog_frame_idx % _HOG_DETECT_INTERVAL == 0:
@@ -256,58 +342,33 @@ class _CameraWorker:
                     if w > _HOG_MAX_WIDTH:
                         det_scale = _HOG_MAX_WIDTH / float(w)
                         det_h = max(1, int(h * det_scale))
-                        det_frame = cv2.resize(
-                            frame, (_HOG_MAX_WIDTH, det_h), interpolation=cv2.INTER_LINEAR
-                        )
-
+                        det_frame = cv2.resize(frame, (_HOG_MAX_WIDTH, det_h),
+                                               interpolation=cv2.INTER_LINEAR)
                     rects, weights = hog.detectMultiScale(
-                        det_frame,
-                        winStride=(8, 8),
-                        padding=(8, 8),
-                        scale=1.08,
+                        det_frame, winStride=(8, 8), padding=(8, 8), scale=1.08,
                     )
-
                     hog_last_boxes = []
                     inv = 1.0 / det_scale
                     for i, (x, y, bw, bh) in enumerate(rects):
                         conf = float(weights[i]) if len(weights) > i else 0.0
-                        x1 = int(x * inv)
-                        y1 = int(y * inv)
-                        x2 = int((x + bw) * inv)
-                        y2 = int((y + bh) * inv)
-                        hog_last_boxes.append((x1, y1, x2, y2, conf))
-
+                        hog_last_boxes.append((
+                            int(x * inv), int(y * inv),
+                            int((x + bw) * inv), int((y + bh) * inv), conf,
+                        ))
                 self.current_count = len(hog_last_boxes)
                 for i, (x1, y1, x2, y2, conf) in enumerate(hog_last_boxes):
-                    cv2.rectangle(frame, (x1, y1), (x2, y2), _C_BOX, 2)
-                    cv2.putText(
-                        frame,
-                        f"H{i} {conf:.2f}",
-                        (x1, max(18, y1 - 6)),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.5,
-                        _C_BOX,
-                        2,
-                    )
+                    new_objs.append({
+                        "x1": x1, "y1": y1, "x2": x2, "y2": y2,
+                        "tid": i, "conf": conf,
+                    })
+                    curr_centroids[i] = ((x1 + x2) // 2, (y1 + y2) // 2)
 
-                cv2.putText(
-                    frame,
-                    "HOG fallback active",
-                    (10, h - 12),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.55,
-                    _C_TEXT,
-                    2,
-                )
+            with _objs_lock:
+                _objs[0] = new_objs
 
-            # ── Counting line logic ──────────────────────────────────────
+            # ── Counting line ──────────────────────────────────────────────
             if self.line:
                 lx1, ly1, lx2, ly2 = self.line.to_pixels(w, h)
-                cv2.line(frame, (lx1, ly1), (lx2, ly2), _C_LINE, 2)
-                # Label ends of line
-                cv2.putText(frame, "IN",  (lx1 + 4, ly1 - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.55, _C_IN,  2)
-                cv2.putText(frame, "OUT", (lx2 - 40, ly2 - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.55, _C_OUT, 2)
-
                 for tid, centroid in curr_centroids.items():
                     if tid not in self._prev_centroids or tid in self._counted_ids:
                         continue
@@ -328,19 +389,7 @@ class _CameraWorker:
 
             self._prev_centroids = curr_centroids
 
-            # ── HUD overlay ──────────────────────────────────────────────
-            _draw_hud(frame, w, self.label, self.count_in, self.count_out,
-                      self.current_count, self.fps)
-
-            # ── Store JPEG ───────────────────────────────────────────────
-            ok, jpeg = cv2.imencode(
-                ".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, _JPEG_QUALITY]
-            )
-            if ok:
-                with self._frame_lock:
-                    self._latest_jpeg = jpeg.tobytes()
-
-            # ── FPS rolling average ──────────────────────────────────────
+            # ── FPS rolling average (tracks inference throughput) ──────────
             frame_count += 1
             elapsed = time.monotonic() - fps_t
             if elapsed >= 2.0:
