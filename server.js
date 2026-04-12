@@ -9,6 +9,106 @@ const mongoose = require('mongoose');
 
 const cors = require('cors');
 
+const CW_TOPICS = [
+    {
+        id: 'html-structure',
+        title: 'HTML Structure',
+        language: 'html',
+        description: 'Basic structure of an HTML document.',
+        code: `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>My Page</title>
+</head>
+<body>
+  <h1>Hello, KIU!</h1>
+</body>
+</html>`
+    },
+    {
+        id: 'css-types',
+        title: 'CSS Types',
+        language: 'css',
+        description: 'Inline, internal, and external CSS examples.',
+        code: `/* Inline CSS */
+<h1 style="color: blue;">Inline Style</h1>
+
+/* Internal CSS */
+<style>
+  h1 { color: green; }
+</style>
+
+/* External CSS (styles.css) */
+h1 { color: purple; }`
+    },
+    {
+        id: 'php-define-variable',
+        title: 'PHP Define Variable',
+        language: 'php',
+        description: 'How to define and print a PHP variable.',
+        code: `<?php
+$name = "KIU CrowdSense";
+echo $name;
+?>`
+    },
+    {
+        id: 'php-data-types',
+        title: 'PHP Data Types',
+        language: 'php',
+        description: 'Common PHP data types in one example.',
+        code: `<?php
+$text = "Hello";            // string
+$num = 25;                   // integer
+$decimal = 12.5;             // float
+$isActive = true;            // boolean
+$items = ["HTML", "CSS"]; // array
+?>`
+    },
+    {
+        id: 'php-function',
+        title: 'PHP Function',
+        language: 'php',
+        description: 'Simple user-defined function in PHP.',
+        code: `<?php
+function greet($name) {
+    return "Hello, " . $name;
+}
+
+echo greet("Student");
+?>`
+    },
+    {
+        id: 'php-for-loop',
+        title: 'For Loop Display 1 to 100',
+        language: 'php',
+        description: 'PHP loop that prints numbers from 1 to 100.',
+        code: `<?php
+for ($i = 1; $i <= 100; $i++) {
+    echo $i . "<br>";
+}
+?>`
+    },
+    {
+        id: 'sql-statements',
+        title: 'SQL Statements (Insert, Update, Delete, Select)',
+        language: 'sql',
+        description: 'Core SQL CRUD statements.',
+        code: `-- SELECT
+SELECT * FROM students;
+
+-- INSERT
+INSERT INTO students (name, age) VALUES ('Aisha', 21);
+
+-- UPDATE
+UPDATE students SET age = 22 WHERE name = 'Aisha';
+
+-- DELETE
+DELETE FROM students WHERE name = 'Aisha';`
+    }
+];
+
 const uri = process.env.MONGO_URI || process.env.mongo_URL || 'mongodb://localhost:27017';
 
 const client = new MongoClient(uri);
@@ -45,6 +145,14 @@ app.get('/health', (req, res) => {
         timestamp: new Date().toISOString(),
         service: 'crowd-dashboard',
         version: process.env.npm_package_version || '2.0.0',
+    });
+});
+
+app.get('/api/cw-topics', (req, res) => {
+    res.json({
+        updated_at: new Date().toISOString(),
+        topic_count: CW_TOPICS.length,
+        topics: CW_TOPICS,
     });
 });
 

@@ -45,6 +45,10 @@ _C_TEXT = (255, 255, 255)   # white      — HUD text
 
 _JPEG_QUALITY = 75          # balance quality vs. stream bandwidth
 _MAX_EVENTS   = 2000        # in-memory event buffer size
+_HOG_DETECT_INTERVAL = 4    # run expensive HOG every N frames in fallback mode
+_HOG_MAX_WIDTH = 640        # downscale fallback detection input for speed
+_WEBCAM_WIDTH = 640
+_WEBCAM_HEIGHT = 480
 
 
 # ── Data classes ───────────────────────────────────────────────────────────
@@ -143,14 +147,23 @@ class _CameraWorker:
     # ── Main loop ──────────────────────────────────────────────────────────
 
     def _run(self) -> None:
+        model = None
+        hog = None
+        hog_frame_idx = 0
+        hog_last_boxes: List[Tuple[int, int, int, int, float]] = []
         try:
             from ultralytics import YOLO
-        except ImportError:
-            log.error("ultralytics not installed — camera %s cannot start", self.camera_id)
-            self._running = False
-            return
-
-        model = YOLO("yolov8n.pt")
+            model = YOLO("yolov8n.pt")
+            log.info("Camera %s using YOLOv8 detector", self.camera_id)
+        except Exception as exc:
+            # Python 3.13 often lacks torch wheels; keep stream alive with HOG fallback.
+            log.warning(
+                "Camera %s falling back to OpenCV HOG detector (YOLO unavailable: %s)",
+                self.camera_id,
+                exc,
+            )
+            hog = cv2.HOGDescriptor()
+            hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
 
         # Resolve source: "0" -> int for webcam
         src: Any = self.source
@@ -162,6 +175,12 @@ class _CameraWorker:
             log.error("Cannot open source: %s", src)
             self._running = False
             return
+
+        # Keep capture latency low and reduce webcam decode work.
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        if isinstance(src, int):
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, _WEBCAM_WIDTH)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, _WEBCAM_HEIGHT)
 
         log.info("Camera %s started — %s", self.camera_id, src)
 
@@ -197,36 +216,89 @@ class _CameraWorker:
 
             h, w = frame.shape[:2]
 
-            # ── YOLOv8 + ByteTrack ───────────────────────────────────────
-            results = model.track(
-                frame,
-                persist=True,
-                classes=[0],        # person only
-                verbose=False,
-                tracker="bytetrack.yaml",
-            )
-            boxes = results[0].boxes
             curr_centroids: Dict[int, Tuple[int, int]] = {}
             self.current_count = 0
 
-            if boxes is not None and boxes.id is not None:
-                self.current_count = len(boxes)
-                for xyxy, tid, conf in zip(
-                    boxes.xyxy.cpu().numpy(),
-                    boxes.id.cpu().numpy(),
-                    boxes.conf.cpu().numpy(),
-                ):
-                    track_id = int(tid)
-                    x1, y1, x2, y2 = map(int, xyxy)
-                    cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
-                    curr_centroids[track_id] = (cx, cy)
+            # ── Detector path: YOLOv8 (preferred) or OpenCV HOG fallback ──
+            if model is not None:
+                results = model.track(
+                    frame,
+                    persist=True,
+                    classes=[0],        # person only
+                    verbose=False,
+                    tracker="bytetrack.yaml",
+                )
+                boxes = results[0].boxes
 
-                    cv2.rectangle(frame, (x1, y1), (x2, y2), _C_BOX, 2)
-                    label_txt = f"#{track_id} {conf:.2f}"
-                    cv2.putText(
-                        frame, label_txt, (x1, y1 - 6),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, _C_BOX, 2,
+                if boxes is not None and boxes.id is not None:
+                    self.current_count = len(boxes)
+                    for xyxy, tid, conf in zip(
+                        boxes.xyxy.cpu().numpy(),
+                        boxes.id.cpu().numpy(),
+                        boxes.conf.cpu().numpy(),
+                    ):
+                        track_id = int(tid)
+                        x1, y1, x2, y2 = map(int, xyxy)
+                        cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+                        curr_centroids[track_id] = (cx, cy)
+
+                        cv2.rectangle(frame, (x1, y1), (x2, y2), _C_BOX, 2)
+                        label_txt = f"#{track_id} {conf:.2f}"
+                        cv2.putText(
+                            frame, label_txt, (x1, y1 - 6),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, _C_BOX, 2,
+                        )
+            elif hog is not None:
+                hog_frame_idx += 1
+                if hog_frame_idx == 1 or hog_frame_idx % _HOG_DETECT_INTERVAL == 0:
+                    det_scale = 1.0
+                    det_frame = frame
+                    if w > _HOG_MAX_WIDTH:
+                        det_scale = _HOG_MAX_WIDTH / float(w)
+                        det_h = max(1, int(h * det_scale))
+                        det_frame = cv2.resize(
+                            frame, (_HOG_MAX_WIDTH, det_h), interpolation=cv2.INTER_LINEAR
+                        )
+
+                    rects, weights = hog.detectMultiScale(
+                        det_frame,
+                        winStride=(8, 8),
+                        padding=(8, 8),
+                        scale=1.08,
                     )
+
+                    hog_last_boxes = []
+                    inv = 1.0 / det_scale
+                    for i, (x, y, bw, bh) in enumerate(rects):
+                        conf = float(weights[i]) if len(weights) > i else 0.0
+                        x1 = int(x * inv)
+                        y1 = int(y * inv)
+                        x2 = int((x + bw) * inv)
+                        y2 = int((y + bh) * inv)
+                        hog_last_boxes.append((x1, y1, x2, y2, conf))
+
+                self.current_count = len(hog_last_boxes)
+                for i, (x1, y1, x2, y2, conf) in enumerate(hog_last_boxes):
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), _C_BOX, 2)
+                    cv2.putText(
+                        frame,
+                        f"H{i} {conf:.2f}",
+                        (x1, max(18, y1 - 6)),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        _C_BOX,
+                        2,
+                    )
+
+                cv2.putText(
+                    frame,
+                    "HOG fallback active",
+                    (10, h - 12),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.55,
+                    _C_TEXT,
+                    2,
+                )
 
             # ── Counting line logic ──────────────────────────────────────
             if self.line:

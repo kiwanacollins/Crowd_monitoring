@@ -77,6 +77,7 @@ const SECTION_TITLES = {
   'live-map':       'Live Map',
   'shops':          'Cameras',
   'analytics':      'Detection Analytics',
+  'cw-topics':      'CW Topics',
   'top-shops':      'Zone Rankings',
   'heatmap':        'Occupancy',
   'history':        'Sessions',
@@ -101,6 +102,7 @@ function navigate(section) {
   if (section === 'heatmap')        loadHeatmap();
   if (section === 'health')         loadHealth();
   if (section === 'live-detection') loadDetectionData();
+  if (section === 'cw-topics')      loadCwTopics();
   if (section === 'history')        loadHistory();
 }
 
@@ -801,7 +803,64 @@ function refreshAll() {
   if (currentSection === 'heatmap')        loadHeatmap();
   if (currentSection === 'health')         loadHealth();
   if (currentSection === 'live-detection') loadDetectionData();
+  if (currentSection === 'cw-topics')      loadCwTopics();
   if (currentSection === 'history')        loadHistory();
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function renderCwTopic(topic) {
+  const language = (topic.language || 'text').toUpperCase();
+  const code = escapeHtml(topic.code || '');
+
+  return `
+    <article class="cw-topic-card">
+      <div class="cw-topic-head">
+        <h3>${topic.title || 'CW Topic'}</h3>
+        <span class="badge blue">${language}</span>
+      </div>
+      <p>${topic.description || ''}</p>
+      <pre class="cw-topic-code"><code>${code}</code></pre>
+    </article>`;
+}
+
+async function loadCwTopics() {
+  const container = document.getElementById('cwTopicsContainer');
+  const updatedAtEl = document.getElementById('cwUpdatedAt');
+  const topicCountEl = document.getElementById('cwTopicCount');
+
+  if (!container) return;
+
+  try {
+    const payload = await apiFetch('/api/cw-topics');
+    const topics = Array.isArray(payload.topics) ? payload.topics : [];
+
+    if (updatedAtEl) {
+      const stamp = payload.updated_at ? new Date(payload.updated_at) : new Date();
+      updatedAtEl.textContent = stamp.toLocaleTimeString();
+    }
+    if (topicCountEl) {
+      topicCountEl.textContent = String(payload.topic_count ?? topics.length);
+    }
+
+    if (!topics.length) {
+      container.innerHTML = `<div class="state-box"><i class="fas fa-book-open"></i><p>No CW topics available.</p></div>`;
+      return;
+    }
+
+    container.innerHTML = topics.map(renderCwTopic).join('');
+  } catch (_) {
+    container.innerHTML = `<div class="state-box"><i class="fas fa-plug-circle-xmark"></i><p>CW topics API unreachable.</p></div>`;
+    if (updatedAtEl) updatedAtEl.textContent = '—';
+    if (topicCountEl) topicCountEl.textContent = '—';
+  }
 }
 
 // ── Live Detection ───────────────────────────────────────────
@@ -833,7 +892,14 @@ async function loadCameraFeeds() {
       grid.innerHTML = `<div class="state-box"><i class="fas fa-camera-slash"></i><p>No cameras configured. Check cameras.json and restart the Python API.</p></div>`;
       return;
     }
-    grid.innerHTML = cameras.map(c => _renderCameraCard(c)).join('');
+    // Keep the USB live webcam featured at the top; demo feeds follow below.
+    const orderedCameras = [...cameras].sort((a, b) => {
+      const aLive = a.camera_id === 'kiu-webcam' ? 0 : 1;
+      const bLive = b.camera_id === 'kiu-webcam' ? 0 : 1;
+      return aLive - bLive;
+    });
+
+    grid.innerHTML = orderedCameras.map(c => _renderCameraCard(c)).join('');
 
     // Wire up image error → offline state
     grid.querySelectorAll('.cam-feed-img').forEach(img => {
@@ -850,8 +916,9 @@ async function loadCameraFeeds() {
 function _renderCameraCard(c) {
   const streamUrl = `${PYTHON_API}/stream/${c.camera_id}`;
   const isRunning = c.running;
+  const isLiveWebcam = c.camera_id === 'kiu-webcam';
   return `
-    <div class="camera-card" id="card-${c.camera_id}">
+    <div class="camera-card${isLiveWebcam ? ' featured-live' : ''}" id="card-${c.camera_id}">
       <div class="camera-card-header">
         <i class="fas fa-video" style="color:var(--accent)"></i>
         <h3>${c.label}</h3>
@@ -950,9 +1017,10 @@ async function loadCrossingEvents() {
   }
 }
 
-// Auto-refresh Live Detection when it's the active section
+// Auto-refresh section-specific live data when active
 setInterval(() => {
   if (currentSection === 'live-detection') loadDetectionData();
+  if (currentSection === 'cw-topics') loadCwTopics();
 }, 5000);
 
 // ── Initialise ───────────────────────────────────────────────
