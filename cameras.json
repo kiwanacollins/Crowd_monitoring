@@ -1,15 +1,22 @@
 [
   {
+    "camera_id": "kiu-webcam",
+    "source": "0",
+    "label": "KIU Live Webcam (USB)",
+    "coordinates": { "latitude": 0.2858, "longitude": 32.5734 },
+    "counting_line": { "x1": 0.0, "y1": 0.5, "x2": 1.0, "y2": 0.5 }
+  },
+  {
     "camera_id": "kiu-main-entrance",
     "source": "crowd.mp4",
-    "label": "KIU Main Entrance",
+    "label": "KIU Main Entrance (Demo)",
     "coordinates": { "latitude": 0.2858, "longitude": 32.5734 },
     "counting_line": { "x1": 0.0, "y1": 0.5, "x2": 1.0, "y2": 0.5 }
   },
   {
     "camera_id": "kiu-library",
     "source": "crowd2.mp4",
-    "label": "KIU Library Block",
+    "label": "KIU Library Block (Demo)",
     "coordinates": { "latitude": 0.2861, "longitude": 32.5738 },
     "counting_line": { "x1": 0.0, "y1": 0.45, "x2": 1.0, "y2": 0.45 }
   }

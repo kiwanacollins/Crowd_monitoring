@@ -12,8 +12,9 @@ const REFRESH_INTERVAL = 5000; // ms
 
 // KIU campus camera zones
 const CAMERA_COORDS = {
-  'kiu-main-entrance': { lat: 0.2858, lng: 32.5734, label: 'Main Entrance' },
-  'kiu-library':       { lat: 0.2861, lng: 32.5738, label: 'Library' },
+  'kiu-webcam':        { lat: 0.2858, lng: 32.5734, label: 'Live Webcam (USB)' },
+  'kiu-main-entrance': { lat: 0.2858, lng: 32.5734, label: 'Main Entrance (Demo)' },
+  'kiu-library':       { lat: 0.2861, lng: 32.5738, label: 'Library Block (Demo)' },
 };
 
 function cameraLabel(id) {
