@@ -162,24 +162,6 @@
     .cam-stat-value.fps { color: var(--warning); }
     .camera-footer { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-top: 1px solid var(--border); }
     .camera-footer button { font-size: 12px; }
-    .cw-topic-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
-    .cw-topic-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
-    .cw-topic-card h3 { font-size: 15px; font-weight: 600; margin-bottom: 8px; }
-    .cw-topic-card p { color: var(--muted); font-size: 13px; margin-bottom: 10px; }
-    .cw-topic-head { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
-    .cw-topic-code {
-      background: #0b0e14;
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 12px;
-      overflow: auto;
-      max-height: 260px;
-      font-size: 12px;
-      line-height: 1.45;
-      color: #d1e3ff;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-      white-space: pre;
-    }
     @media (max-width: 1100px) {
       #cameraGrid { grid-template-columns: 1fr; }
       .camera-card.featured-live { grid-column: auto; }
@@ -211,9 +193,6 @@
         <div class="nav-section-label" style="margin-top:8px">Analytics</div>
         <div class="nav-item" data-section="analytics" onclick="navigate('analytics')">
           <i class="fas fa-chart-line"></i> Analytics
-        </div>
-        <div class="nav-item" data-section="cw-topics" onclick="navigate('cw-topics')">
-          <i class="fas fa-code"></i> CW Topics
         </div>
         <div class="nav-item" data-section="top-shops" onclick="navigate('top-shops')">
           <i class="fas fa-trophy"></i> Zone Rankings
@@ -477,33 +456,6 @@
               </div>
               <canvas id="anCompareChart" style="max-height:280px"></canvas>
             </div>
-          </div>
-        </section>
-
-        <!-- CW TOPICS -->
-        <section class="section" id="sec-cw-topics">
-          <div class="section-header">
-            <h2>CW Topics</h2>
-            <p>Real-time coursework topics with code examples (auto-refresh every 5 seconds).</p>
-          </div>
-
-          <div class="cards-row" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr));margin-bottom:20px">
-            <div class="card">
-              <div class="card-icon blue"><i class="fas fa-clock"></i></div>
-              <div class="card-label">Last Updated</div>
-              <div class="card-value" id="cwUpdatedAt" style="font-size:20px">—</div>
-              <div class="card-sub">Server timestamp</div>
-            </div>
-            <div class="card">
-              <div class="card-icon purple"><i class="fas fa-list-check"></i></div>
-              <div class="card-label">Topics</div>
-              <div class="card-value" id="cwTopicCount">—</div>
-              <div class="card-sub">Available CW examples</div>
-            </div>
-          </div>
-
-          <div id="cwTopicsContainer" class="cw-topic-grid">
-            <div class="state-box"><div class="spinner"></div><p>Loading CW topics…</p></div>
           </div>
         </section>
 
