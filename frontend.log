@@ -1,0 +1,94 @@
+
+> crowd-monitoring@2.0.0 start
+> node server.js
+
+(node:52554) [MONGODB DRIVER] Warning: useNewUrlParser is a deprecated option: useNewUrlParser has no effect since Node.js Driver version 4.0.0 and will be removed in the next major version
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:52554) [MONGODB DRIVER] Warning: useUnifiedTopology is a deprecated option: useUnifiedTopology has no effect since Node.js Driver version 4.0.0 and will be removed in the next major version
+MongoDB connection failed: MongooseServerSelectionError: connect EPERM ::1:27017 - Local (:::0)Received request to fetch data
+Fetching data from MongoDB...
+Data fetched successfully. Number of documents: 50
+Received request to fetch data
+Fetching data from MongoDB...
+Data fetched successfully. Number of documents: 50
+Received request to fetch data
+Fetching data from MongoDB...
+Data fetched successfully. Number of documents: 50
+Received request to fetch data
+Fetching data from MongoDB...
+Data fetched successfully. Number of documents: 50
+Received request to fetch data
+Fetching data from MongoDB...
+Data fetched successfully. Number of documents: 50
+Received request to fetch data
+Fetching data from MongoDB...
+Data fetched successfully. Number of documents: 50
+Received request to fetch data
+Fetching data from MongoDB...
+Data fetched successfully. Number of documents: 50
+Received request to fetch data
+Fetching data from MongoDB...
+Data fetched successfully. Number of documents: 50
+Received request to fetch data
+Fetching data from MongoDB...
+Data fetched successfully. Number of documents: 50
+Received request to fetch data
+Fetching data from MongoDB...
+Data fetched successfully. Number of documents: 50
+Received request to fetch data
+Fetching data from MongoDB...
+Data fetched successfully. Number of documents: 50
+Received request to fetch data
+Fetching data from MongoDB...
+Data fetched successfully. Number of documents: 50
+Received request to fetch data
+Fetching data from MongoDB...
+Data fetched successfully. Number of documents: 50
+Received request to fetch data
+Fetching data from MongoDB...
+Data fetched successfully. Number of documents: 50
+Received request to fetch data
+Fetching data from MongoDB...
+Data fetched successfully. Number of documents: 50
+Received request to fetch data
+Fetching data from MongoDB...
+Data fetched successfully. Number of documents: 50
+Received request to fetch data
+Fetching data from MongoDB...
+Data fetched successfully. Number of documents: 50
+Received request to fetch data
+Fetching data from MongoDB...
+Data fetched successfully. Number of documents: 50
+Received request to fetch data
+Fetching data from MongoDB...
+Data fetched successfully. Number of documents: 50
+Received request to fetch data
+Fetching data from MongoDB...
+Data fetched successfully. Number of documents: 50
+Received request to fetch data
+Fetching data from MongoDB...
+Data fetched successfully. Number of documents: 50
+Received request to fetch data
+Fetching data from MongoDB...
+Data fetched successfully. Number of documents: 50
+Received request to fetch data
+Fetching data from MongoDB...
+Data fetched successfully. Number of documents: 50
+Received request to fetch data
+Fetching data from MongoDB...
+Data fetched successfully. Number of documents: 50
+Received request to fetch data
+Fetching data from MongoDB...
+Data fetched successfully. Number of documents: 50
+Received request to fetch data
+Fetching data from MongoDB...
+Data fetched successfully. Number of documents: 50
+t internalConnectMultiple (node:net:1210:5)
+        at defaultTriggerAsyncIdScope (node:internal/async_hooks:472:18)
+        at GetAddrInfoReqWrap.emitLookup [as callback] (node:net:1552:7)
+        at GetAddrInfoReqWrap.onlookupall [as oncomplete] (node:dns:133:8) {
+      code: 'EPERM',
+      [errors]: [Array]
+    }
+  }
+}
