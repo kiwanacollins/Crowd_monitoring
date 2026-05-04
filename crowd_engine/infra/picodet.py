@@ -32,9 +32,10 @@ log = get_logger(__name__)
 
 # ── Model constants ────────────────────────────────────────────────────────
 _MODEL_FILENAME = "picodet_m_320_coco_no_postprocess.onnx"
+# Primary URL (paddledet CDN). Falls back gracefully to MobileNetSSD if unreachable.
 _MODEL_URL = (
-    "https://bj.bcebos.com/paddlehub/fastdeploy/"
-    + _MODEL_FILENAME
+    "https://paddledet.bj.bcebos.com/fastdeploy/"
+    "picodet_m_320_coco_lcnet_nopp.onnx"
 )
 _INPUT_SIZE = 320
 _STRIDES    = [8, 16, 32, 64]
@@ -92,7 +93,13 @@ class PicoDetM:
         if not os.path.exists(self._path):
             log.info("Downloading PicoDet-M → %s  (≈9 MB) …", self._path)
             try:
-                urllib.request.urlretrieve(_MODEL_URL, self._path)
+                import ssl
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode    = ssl.CERT_NONE
+                opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
+                with opener.open(_MODEL_URL) as resp, open(self._path, "wb") as fh:
+                    fh.write(resp.read())
                 size_kb = os.path.getsize(self._path) // 1024
                 log.info("PicoDet-M downloaded (%d KB)", size_kb)
             except Exception as exc:

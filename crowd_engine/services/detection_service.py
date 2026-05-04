@@ -68,6 +68,9 @@ _ROI_MARGIN           = 0.35  # half-height of ROI band around counting line (±
 _PICODET_CONF    = 0.35
 _PICODET_NMS_IOU = 0.45
 
+# ── MobileNetSSD parameters ────────────────────────────────────────────────
+_SSD_CONF_THRESH = 0.40   # minimum confidence for person detections
+
 # ── YOLO fallback parameters ───────────────────────────────────────────────
 _YOLO_IMGSZ = 416
 _YOLO_CONF  = 0.25
@@ -172,50 +175,14 @@ class _CameraWorker:
     # ── Main loop ──────────────────────────────────────────────────────────
 
     def _run(self) -> None:
-        # ── Detector / tracker initialisation ─────────────────────────────
-        detector   = None   # PicoDetM instance
-        tracker_bt = None   # boxmot ByteTrack
-        model      = None   # YOLO fallback
-        hog        = None   # HOG last resort
+        # ── Detector / tracker initialisation (done after src_fps is known) ─
+        detector   = None   # PicoDetM or MobileNetSSD DNN net
+        det_type   = None   # "picodet" | "ssd"
+        tracker_bt = None   # ByteTrack-Lite instance
+        model      = None   # YOLO fallback (unused on Py 3.13)
+        hog        = None   # HOG absolute last resort
         hog_frame_idx  = 0
         hog_last_boxes: List[Tuple[int, int, int, int, float]] = []
-
-        # 1. Try PicoDet-M + our lite ByteTrack (fastest on CPU, no torch needed)
-        try:
-            from crowd_engine.infra.picodet import PicoDetM
-            from crowd_engine.infra.bytetrack_lite import ByteTrack as LiteByteTrack
-            _det = PicoDetM()
-            if _det.load():
-                detector   = _det
-                tracker_bt = LiteByteTrack(
-                    track_thresh=0.45,
-                    track_buffer=30,
-                    match_thresh=0.8,
-                    frame_rate=int(src_fps),
-                )
-                log.info("Camera %s → PicoDet-M + ByteTrack-Lite", self.camera_id)
-        except Exception as exc:
-            log.warning("PicoDet/ByteTrack-Lite unavailable (%s) — trying YOLO", exc)
-
-        # 2. YOLO fallback
-        if detector is None:
-            try:
-                from ultralytics import YOLO
-                for _m in _YOLO_MODELS:
-                    try:
-                        model = YOLO(_m)
-                        log.info("Camera %s → %s (YOLO fallback)", self.camera_id, _m)
-                        break
-                    except Exception:
-                        pass
-            except Exception as exc:
-                log.warning("YOLO unavailable (%s) — using HOG", exc)
-
-        # 3. HOG last resort
-        if detector is None and model is None:
-            hog = cv2.HOGDescriptor()
-            hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
-            log.info("Camera %s → OpenCV HOG (last resort)", self.camera_id)
 
         # Resolve source: "0" -> int for webcam
         src: Any = self.source
@@ -239,6 +206,69 @@ class _CameraWorker:
             src_fps = 25.0
 
         log.info("Camera %s started — %s (source %.1f FPS)", self.camera_id, src, src_fps)
+
+        # ── Model / tracker init — done here so src_fps is available ─────────
+
+        # 1. Try PicoDet-M ONNX + ByteTrack-Lite (fastest CPU, no torch needed)
+        try:
+            from crowd_engine.infra.picodet import PicoDetM
+            from crowd_engine.infra.bytetrack_lite import ByteTrack as LiteByteTrack
+            _det = PicoDetM()
+            if _det.load():
+                detector   = _det
+                det_type   = "picodet"
+                tracker_bt = LiteByteTrack(
+                    track_thresh=0.45, track_buffer=30,
+                    match_thresh=0.8,  frame_rate=int(src_fps),
+                )
+                log.info("Camera %s → PicoDet-M + ByteTrack-Lite ✔", self.camera_id)
+            else:
+                log.warning("Camera %s: PicoDet-M not available — trying MobileNetSSD", self.camera_id)
+        except Exception as exc:
+            log.warning("Camera %s: PicoDet unavailable (%s) — trying MobileNetSSD", self.camera_id, exc)
+
+        # 2. MobileNetSSD DNN + ByteTrack-Lite (model files ship with the project)
+        if detector is None:
+            try:
+                import os as _os
+                from crowd_engine.infra.bytetrack_lite import ByteTrack as LiteByteTrack
+                _prototxt = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.dirname(
+                    _os.path.abspath(__file__)))), "MobileNetSSD_deploy.prototxt")
+                _caffemodel = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.dirname(
+                    _os.path.abspath(__file__)))), "MobileNetSSD_deploy.caffemodel")
+                if _os.path.isfile(_prototxt) and _os.path.isfile(_caffemodel):
+                    _net = cv2.dnn.readNetFromCaffe(_prototxt, _caffemodel)
+                    detector   = _net
+                    det_type   = "ssd"
+                    tracker_bt = LiteByteTrack(
+                        track_thresh=0.40, track_buffer=25,
+                        match_thresh=0.75, frame_rate=int(src_fps),
+                    )
+                    log.info("Camera %s → MobileNetSSD + ByteTrack-Lite ✔", self.camera_id)
+                else:
+                    log.warning("Camera %s: MobileNetSSD model files missing — trying YOLO", self.camera_id)
+            except Exception as exc:
+                log.warning("Camera %s: MobileNetSSD failed (%s) — trying YOLO", self.camera_id, exc)
+
+        # 3. YOLO fallback (requires torch; unavailable on Python 3.13)
+        if detector is None:
+            try:
+                from ultralytics import YOLO
+                for _m in _YOLO_MODELS:
+                    try:
+                        model = YOLO(_m)
+                        log.info("Camera %s → %s (YOLO fallback)", self.camera_id, _m)
+                        break
+                    except Exception:
+                        pass
+            except Exception as exc:
+                log.warning("Camera %s: YOLO unavailable (%s) — using HOG", self.camera_id, exc)
+
+        # 4. HOG absolute last resort
+        if detector is None and model is None:
+            hog = cv2.HOGDescriptor()
+            hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
+            log.info("Camera %s → OpenCV HOG (last resort)", self.camera_id)
 
         # macOS permission warm-up for live cameras
         if is_live:
@@ -393,8 +423,9 @@ class _CameraWorker:
                 self._cross_states.clear()
                 if tracker_bt is not None:
                     from crowd_engine.infra.bytetrack_lite import ByteTrack as LiteByteTrack
+                    _thresh = 0.45 if det_type == "picodet" else 0.40
                     tracker_bt = LiteByteTrack(
-                        track_thresh=0.45, track_buffer=30,
+                        track_thresh=_thresh, track_buffer=30,
                         match_thresh=0.8,  frame_rate=int(src_fps),
                     )
 
@@ -406,7 +437,7 @@ class _CameraWorker:
             # ── ROI crop (PicoDet only; speeds up inference by ~4×) ────────
             roi_frame = frame
             y_offset  = 0
-            if detector is not None and self.line:
+            if det_type == "picodet" and self.line:
                 line_ny   = (self.line.ny1 + self.line.ny2) / 2.0
                 margin_px = int(_ROI_MARGIN * h)
                 roi_y0 = max(0, int(line_ny * h) - margin_px)
@@ -415,8 +446,8 @@ class _CameraWorker:
                     roi_frame = frame[roi_y0:roi_y1, :]
                     y_offset  = roi_y0
 
-            # ── PicoDet-M + BoxMot ByteTrack ───────────────────────────────
-            if detector is not None and tracker_bt is not None:
+            # ── PicoDet-M + ByteTrack-Lite ─────────────────────────────────
+            if det_type == "picodet" and detector is not None and tracker_bt is not None:
                 dets = detector.detect(roi_frame,
                                        conf=_PICODET_CONF,
                                        nms_iou=_PICODET_NMS_IOU)
@@ -442,7 +473,46 @@ class _CameraWorker:
                     tid    = int(t[4])
                     conf_t = float(t[5]) if len(t) > 5 else 1.0
                     cx     = (x1 + x2) // 2
-                    foot_y = y2          # foot anchor — more stable for crossing
+                    foot_y = y2
+                    curr_centroids[tid] = (cx, foot_y)
+                    new_objs.append({
+                        "x1": x1, "y1": y1, "x2": x2, "y2": y2,
+                        "tid": tid, "conf": conf_t,
+                    })
+
+            # ── MobileNetSSD DNN + ByteTrack-Lite ─────────────────────────
+            elif det_type == "ssd" and detector is not None and tracker_bt is not None:
+                _SSD_PERSON = 15   # MobileNetSSD COCO class index for "person"
+                _SSD_SIZE   = 300
+                blob = cv2.dnn.blobFromImage(
+                    cv2.resize(frame, (_SSD_SIZE, _SSD_SIZE)),
+                    0.007843, (_SSD_SIZE, _SSD_SIZE), 127.5,
+                )
+                detector.setInput(blob)
+                detections = detector.forward()   # [1, 1, N, 7]
+                dets_list = []
+                for k in range(detections.shape[2]):
+                    conf_k = float(detections[0, 0, k, 2])
+                    cls_k  = int(detections[0, 0, k, 1])
+                    if conf_k < _SSD_CONF_THRESH or cls_k != _SSD_PERSON:
+                        continue
+                    x1k = int(detections[0, 0, k, 3] * w)
+                    y1k = int(detections[0, 0, k, 4] * h)
+                    x2k = int(detections[0, 0, k, 5] * w)
+                    y2k = int(detections[0, 0, k, 6] * h)
+                    dets_list.append([x1k, y1k, x2k, y2k, conf_k, 0.0])
+
+                dets_np = (np.array(dets_list, dtype=np.float32)
+                           if dets_list else np.empty((0, 6), dtype=np.float32))
+                tracks = tracker_bt.update(dets_np, frame)
+                new_count = len(tracks)
+
+                for t in tracks:
+                    x1, y1, x2, y2 = int(t[0]), int(t[1]), int(t[2]), int(t[3])
+                    tid    = int(t[4])
+                    conf_t = float(t[5]) if len(t) > 5 else 1.0
+                    cx     = (x1 + x2) // 2
+                    foot_y = y2
                     curr_centroids[tid] = (cx, foot_y)
                     new_objs.append({
                         "x1": x1, "y1": y1, "x2": x2, "y2": y2,
