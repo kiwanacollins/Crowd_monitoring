@@ -1997,3 +1997,5 @@ INFO:     127.0.0.1:53911 - "GET /api/v1/metrics HTTP/1.1" 200 OK
 INFO:     127.0.0.1:53903 - "GET /api/v1/cameras HTTP/1.1" 200 OK
 INFO:     127.0.0.1:53903 - "GET /api/v1/cameras HTTP/1.1" 200 OK
 INFO:     127.0.0.1:53903 - "GET /api/v1/cameras HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53903 - "GET /api/v1/cameras HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53903 - "GET /api/v1/cameras HTTP/1.1" 200 OK
