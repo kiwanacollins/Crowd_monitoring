@@ -98,12 +98,14 @@ class PicoDetM:
                 ctx.check_hostname = False
                 ctx.verify_mode    = ssl.CERT_NONE
                 opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
-                with opener.open(_MODEL_URL) as resp, open(self._path, "wb") as fh:
+                with opener.open(_MODEL_URL, timeout=10) as resp, open(self._path, "wb") as fh:
                     fh.write(resp.read())
                 size_kb = os.path.getsize(self._path) // 1024
+                if size_kb < 100:       # sanity: a valid ONNX should be >>100 KB
+                    raise ValueError(f"Downloaded file too small ({size_kb} KB) — likely an error page")
                 log.info("PicoDet-M downloaded (%d KB)", size_kb)
             except Exception as exc:
-                log.error("PicoDet-M download failed: %s", exc)
+                log.error("PicoDet-M download failed: %s — will use MobileNetSSD fallback", exc)
                 if os.path.exists(self._path):
                     os.remove(self._path)  # remove partial file
                 return False
