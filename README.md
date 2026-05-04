@@ -154,7 +154,7 @@ Copy `.env.example` to `.env`. **Never commit `.env` to version control.**
 | `PORT` | `3000` | Node.js server port |
 | `API_PORT` | `8000` | Python API port |
 | `API_SECRET_KEY` | `changeme` | Change in production |
-| `PROVIDER_CHAIN` | `roboflow,huggingface,geospatial,opencv` | Ordered fallback chain |
+| `PROVIDER_CHAIN` | `roboflow,geospatial,opencv` | Ordered fallback chain |
 | `ROBOFLOW_API_KEY` | *(empty)* | Free-tier key from roboflow.com |
 | `HF_MODEL` | `facebook/detr-resnet-50` | HuggingFace model |
 | `HF_API_KEY` | *(empty)* | HuggingFace Inference API key |
@@ -167,6 +167,7 @@ Copy `.env.example` to `.env`. **Never commit `.env` to version control.**
 | `LOG_LEVEL` | `INFO` | DEBUG / INFO / WARNING / ERROR |
 | `LOG_JSON` | `false` | true = JSON-line logs (production) |
 | `RATE_LIMIT_PER_MINUTE` | `60` | API rate limit per IP |
+| `DOCKER_PROVIDER_CHAIN` | `roboflow,geospatial,opencv` | Optional Docker-only provider order override |
 
 ---
 
@@ -175,8 +176,14 @@ Copy `.env.example` to `.env`. **Never commit `.env` to version control.**
 ### Provider Chain
 
 ```bash
-# Production (full chain)
+# Production (recommended default)
+PROVIDER_CHAIN=roboflow,geospatial,opencv
+
+# Full chain (includes local HuggingFace model warm-up on startup)
 PROVIDER_CHAIN=roboflow,huggingface,geospatial,opencv
+
+# Docker-only override (does not affect local non-Docker runs)
+DOCKER_PROVIDER_CHAIN=roboflow,geospatial,opencv
 
 # Offline / no API keys
 PROVIDER_CHAIN=huggingface,opencv
@@ -304,11 +311,39 @@ python -m pytest tests/integration/ -v
 ## Docker Deployment
 
 ```bash
-# Start all services
+# Build and start MongoDB + Dashboard + Python API
 docker compose up --build
 
-# Stop
+# Stop all services
 docker compose down
+```
+
+### Optional: run detection worker too
+
+The detector service (`crowd-engine`) is available as an optional profile so the
+core stack can start even when demo camera sources are unavailable.
+
+```bash
+# Start full stack including detector worker
+docker compose --profile detection up --build
+```
+
+### Container URLs
+
+- Dashboard: `http://localhost:3000/crowd`
+- Admin/Login: `http://localhost:3000/`
+- FastAPI docs: `http://localhost:8000/docs`
+
+### Notes
+
+- Compose uses container-internal service discovery (`mongo`, `crowd-dashboard`) automatically.
+- `MobileNetSSD_deploy.caffemodel` is mounted read-only into Python services for OpenCV fallback.
+- If you only want API + dashboard behavior, run without the `detection` profile.
+
+### Clean shutdown (remove Mongo volume too)
+
+```bash
+docker compose down -v
 ```
 
 ---
@@ -347,6 +382,8 @@ The original `detection.py` is preserved unchanged. The OpenCV MobileNetSSD logi
 **Roboflow 401:** Check `ROBOFLOW_API_KEY`.
 
 **HuggingFace slow (first run):** Expected — downloading model. Subsequent runs use cache.
+
+**API container stays "starting" in Docker:** Set `DOCKER_PROVIDER_CHAIN=roboflow,geospatial,opencv` (or keep `huggingface` last) to avoid long startup model warm-up.
 
 **Circuit breaker tripping:** Provider is consistently failing. Check `/api/v1/orchestrator/health` and remove failing provider from `PROVIDER_CHAIN`.
 

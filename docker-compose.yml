@@ -1,19 +1,80 @@
+x-python-env: &python-env
+  API_HOST: "0.0.0.0"
+  API_PORT: "8000"
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  LOG_JSON: ${LOG_JSON:-true}
+  RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-60}
+  PROVIDER_CHAIN: ${DOCKER_PROVIDER_CHAIN:-roboflow,geospatial,opencv}
+  HF_MODEL: ${HF_MODEL:-facebook/detr-resnet-50}
+  HF_API_KEY: ${HF_API_KEY:-}
+  ROBOFLOW_API_KEY: ${ROBOFLOW_API_KEY:-}
+  ROBOFLOW_WORKSPACE: ${ROBOFLOW_WORKSPACE:-crowd-counting}
+  ROBOFLOW_MODEL_ID: ${ROBOFLOW_MODEL_ID:-crowd-counting-1}
+  ROBOFLOW_MODEL_VERSION: ${ROBOFLOW_MODEL_VERSION:-1}
+  OPENCV_PROTOTXT: ${OPENCV_PROTOTXT:-MobileNetSSD_deploy.prototxt}
+  OPENCV_CAFFEMODEL: ${OPENCV_CAFFEMODEL:-MobileNetSSD_deploy.caffemodel}
+  CAMERAS_FILE: /app/cameras.json
+  NODE_SERVER_URL: http://crowd-dashboard:3000
+  MONGO_URI: mongodb://mongo:27017/${MONGO_DB:-home}
+
 services:
-  # ── Python Crowd Engine API ──────────────────────────────────────────────
+  # ── MongoDB ──────────────────────────────────────────────────────────────
+  mongo:
+    image: mongo:7
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_DATABASE: ${MONGO_DB:-home}
+    volumes:
+      - mongo-data:/data/db
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Node.js Dashboard Server ─────────────────────────────────────────────
+  crowd-dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile.dashboard
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      MONGO_URI: mongodb://mongo:27017/${MONGO_DB:-home}
+      mongo_URL: mongodb://mongo:27017/${MONGO_DB:-home}
+    depends_on:
+      mongo:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://localhost:3000/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ── Python Crowd API ─────────────────────────────────────────────────────
   crowd-api:
     build:
       context: .
       dockerfile: Dockerfile
+    image: crowd-monitoring-python:latest
     ports:
       - "8000:8000"
-    env_file:
-      - .env
     environment:
-      - LOG_JSON=true
-      - PROVIDER_CHAIN=roboflow,huggingface,geospatial,opencv
+      <<: *python-env
     volumes:
-      # Mount model file separately (large binary)
       - ./MobileNetSSD_deploy.caffemodel:/app/MobileNetSSD_deploy.caffemodel:ro
+      - ./cameras.json:/app/cameras.json:ro
     depends_on:
       mongo:
         condition: service_healthy
@@ -22,42 +83,25 @@ services:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/livez')"]
       interval: 30s
       timeout: 10s
+      start_period: 120s
       retries: 3
 
-  # ── Node.js Dashboard Server ─────────────────────────────────────────────
-  crowd-dashboard:
-    image: node:20-slim
-    working_dir: /app
-    command: node server.js
-    ports:
-      - "3000:3000"
-    env_file:
-      - .env
+  # ── Optional detection worker (pushes data to Node /update_data) ────────
+  crowd-engine:
+    image: crowd-monitoring-python:latest
+    command: ["python", "-m", "crowd_engine", "--cameras", "/app/cameras.json"]
+    profiles: ["detection"]
     environment:
-      - PORT=3000
+      <<: *python-env
     volumes:
-      - .:/app
-      - /app/node_modules
+      - ./MobileNetSSD_deploy.caffemodel:/app/MobileNetSSD_deploy.caffemodel:ro
+      - ./cameras.json:/app/cameras.json:ro
     depends_on:
       mongo:
         condition: service_healthy
+      crowd-dashboard:
+        condition: service_healthy
     restart: unless-stopped
-
-  # ── MongoDB ──────────────────────────────────────────────────────────────
-  mongo:
-    image: mongo:7
-    ports:
-      - "27017:27017"
-    volumes:
-      - mongo-data:/data/db
-    environment:
-      - MONGO_INITDB_DATABASE=home
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
 
 volumes:
   mongo-data:

@@ -1,0 +1,21 @@
+.git
+.github
+.venv
+.venv-*
+venv
+node_modules
+backend/node_modules
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.mypy_cache
+build
+dist
+*.log
+.DS_Store
+
+# Large artifacts not needed in image build context
+MobileNetSSD_deploy.caffemodel
+yolov8s.pt

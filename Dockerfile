@@ -4,6 +4,9 @@ FROM python:3.11-slim
 LABEL maintainer="Crowd Monitoring Team"
 LABEL description="Modular Crowd Management & Monitoring Platform"
 
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
 # System dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libglib2.0-0 \
@@ -16,14 +19,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 # Install Python dependencies first for layer caching
-COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.txt requirements.docker.txt ./
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir --default-timeout=300 --retries=8 -r requirements.docker.txt
 
 # Copy application code
 COPY crowd_engine/ ./crowd_engine/
 COPY api_server.py ./
 COPY cameras.json ./
 COPY MobileNetSSD_deploy.prototxt ./
+COPY yolov8n.pt ./
 
 # Model file (large — mount via volume in production)
 # COPY MobileNetSSD_deploy.caffemodel ./
