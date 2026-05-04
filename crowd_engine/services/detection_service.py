@@ -1,12 +1,23 @@
 """
 Real-time Detection Service
 ============================
-Manages per-camera background threads, each running YOLOv8n + ByteTrack to:
-  1. Capture frames from the video source (file, RTSP, webcam)
-  2. Track every person across frames with a persistent ID
-  3. Detect when a person crosses a configurable counting line (IN / OUT)
-  4. Annotate frames and store the latest JPEG for MJPEG streaming
-  5. Record crossing events and expose live stats / metrics
+Manages per-camera background threads.  Detection pipeline (priority order):
+
+  1. PP-PicoDet-M 320 (ONNX Runtime) + BoxMot ByteTrack  ← preferred (fast CPU)
+  2. YOLOv8s / YOLOv8n (Ultralytics) + built-in ByteTrack ← YOLO fallback
+  3. OpenCV HOG people detector                            ← last resort
+
+Counting improvements over naive approach
+-----------------------------------------
+* Foot-anchor  — uses bottom-centre of bbox (more stable than body centre
+                 for horizontal lines; crosses line before torso does).
+* Dwell-confirm — a crossing is only counted after the person stays on the
+                  new side for _CROSS_CONFIRM_FRAMES consecutive frames.
+                  Eliminates false counts from bbox jitter near the line.
+* Stateful per-track side dict — replaces the old "counted_ids" set so a
+                  person who re-crosses the line is counted again correctly.
+* ROI crop     — when a counting line is configured, PicoDet only processes
+                  a band ±_ROI_MARGIN around the line (big speed gain on CPU).
 
 Usage
 -----
@@ -14,11 +25,8 @@ Usage
     svc.start_camera("cam-01", source="crowd.mp4", label="Main Entrance",
                      line_cfg={"x1": 0.0, "y1": 0.5, "x2": 1.0, "y2": 0.5})
 
-    # In a FastAPI streaming endpoint:
-    frame_bytes = svc.get_latest_frame("cam-01")
-
-    # Counts
-    stats = svc.get_stats("cam-01")  # CameraStats dataclass
+    frame_bytes = svc.get_latest_frame("cam-01")   # MJPEG frame
+    stats       = svc.get_stats("cam-01")           # CameraStats dataclass
 """
 
 from __future__ import annotations
@@ -43,17 +51,28 @@ _C_IN   = (50,  220,  50)   # green      — "IN" label
 _C_OUT  = (50,   50, 220)   # red        — "OUT" label
 _C_TEXT = (255, 255, 255)   # white      — HUD text
 
-_JPEG_QUALITY      = 80     # slightly higher quality for smoother stream appearance
+_JPEG_QUALITY      = 80     # MJPEG stream quality
 _MAX_EVENTS        = 2000   # in-memory event buffer size
-_HOG_DETECT_INTERVAL = 4   # run expensive HOG every N frames in fallback mode
-_HOG_MAX_WIDTH     = 640   # downscale fallback detection input for speed
+_HOG_DETECT_INTERVAL = 4   # run HOG every N frames (fallback only)
+_HOG_MAX_WIDTH     = 640   # downscale HOG input for speed
 _WEBCAM_WIDTH      = 640
 _WEBCAM_HEIGHT     = 480
 _RENDER_FPS        = 25.0  # target FPS for the MJPEG render thread
-_YOLO_IMGSZ        = 416   # inference input size — 35% faster than 640 on CPU
-_YOLO_CONF         = 0.25  # confidence threshold (lower = catches more people)
-_YOLO_IOU          = 0.45  # NMS IOU threshold
-_FRAME_SKIP_MAX    = 8     # max frames to skip per cycle when catching up to real-time
+_FRAME_SKIP_MAX    = 8     # max frames to skip per cycle when catching up
+
+# ── Counting / tracking parameters ────────────────────────────────────────
+_CROSS_CONFIRM_FRAMES = 3   # consecutive frames on new side to confirm a crossing
+_ROI_MARGIN           = 0.35  # half-height of ROI band around counting line (±35% of h)
+
+# ── PicoDet-M inference parameters ────────────────────────────────────────
+_PICODET_CONF    = 0.35
+_PICODET_NMS_IOU = 0.45
+
+# ── YOLO fallback parameters ───────────────────────────────────────────────
+_YOLO_IMGSZ = 416
+_YOLO_CONF  = 0.25
+_YOLO_IOU   = 0.45
+_YOLO_MODELS = ["yolov8s.pt", "yolov8n.pt"]   # best-first cascade
 
 
 # ── Data classes ───────────────────────────────────────────────────────────
@@ -109,7 +128,8 @@ class _CameraWorker:
         self.session_start = datetime.now(timezone.utc).isoformat()
 
         self._prev_centroids: Dict[int, Tuple[int, int]] = {}
-        self._counted_ids: set = set()
+        self._cross_states:   Dict[int, dict]           = {}
+        # cross_states per track: {"side": bool, "candidate": Optional[bool], "dwell": int}
 
         self._latest_jpeg: Optional[bytes] = None
         self._frame_lock  = threading.Lock()
@@ -129,7 +149,7 @@ class _CameraWorker:
     def reset_counts(self) -> None:
         self.count_in  = 0
         self.count_out = 0
-        self._counted_ids.clear()
+        self._cross_states.clear()
         self._prev_centroids.clear()
 
     def get_latest_frame(self) -> Optional[bytes]:
@@ -152,21 +172,50 @@ class _CameraWorker:
     # ── Main loop ──────────────────────────────────────────────────────────
 
     def _run(self) -> None:
-        model = None
-        hog = None
-        hog_frame_idx = 0
+        # ── Detector / tracker initialisation ─────────────────────────────
+        detector   = None   # PicoDetM instance
+        tracker_bt = None   # boxmot ByteTrack
+        model      = None   # YOLO fallback
+        hog        = None   # HOG last resort
+        hog_frame_idx  = 0
         hog_last_boxes: List[Tuple[int, int, int, int, float]] = []
+
+        # 1. Try PicoDet-M + our lite ByteTrack (fastest on CPU, no torch needed)
         try:
-            from ultralytics import YOLO
-            model = YOLO("yolov8n.pt")
-            log.info("Camera %s using YOLOv8 detector", self.camera_id)
+            from crowd_engine.infra.picodet import PicoDetM
+            from crowd_engine.infra.bytetrack_lite import ByteTrack as LiteByteTrack
+            _det = PicoDetM()
+            if _det.load():
+                detector   = _det
+                tracker_bt = LiteByteTrack(
+                    track_thresh=0.45,
+                    track_buffer=30,
+                    match_thresh=0.8,
+                    frame_rate=int(src_fps),
+                )
+                log.info("Camera %s → PicoDet-M + ByteTrack-Lite", self.camera_id)
         except Exception as exc:
-            log.warning(
-                "Camera %s falling back to OpenCV HOG detector (YOLO unavailable: %s)",
-                self.camera_id, exc,
-            )
+            log.warning("PicoDet/ByteTrack-Lite unavailable (%s) — trying YOLO", exc)
+
+        # 2. YOLO fallback
+        if detector is None:
+            try:
+                from ultralytics import YOLO
+                for _m in _YOLO_MODELS:
+                    try:
+                        model = YOLO(_m)
+                        log.info("Camera %s → %s (YOLO fallback)", self.camera_id, _m)
+                        break
+                    except Exception:
+                        pass
+            except Exception as exc:
+                log.warning("YOLO unavailable (%s) — using HOG", exc)
+
+        # 3. HOG last resort
+        if detector is None and model is None:
             hog = cv2.HOGDescriptor()
             hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
+            log.info("Camera %s → OpenCV HOG (last resort)", self.camera_id)
 
         # Resolve source: "0" -> int for webcam
         src: Any = self.source
@@ -340,16 +389,68 @@ class _CameraWorker:
             # Video looped → reset tracker + counting state
             if looped and not is_live:
                 _tracker_persist = False
-                self._prev_centroids = {}
-                self._counted_ids.clear()
+                self._prev_centroids.clear()
+                self._cross_states.clear()
+                if tracker_bt is not None:
+                    from crowd_engine.infra.bytetrack_lite import ByteTrack as LiteByteTrack
+                    tracker_bt = LiteByteTrack(
+                        track_thresh=0.45, track_buffer=30,
+                        match_thresh=0.8,  frame_rate=int(src_fps),
+                    )
 
             h, w = frame.shape[:2]
             curr_centroids: Dict[int, Tuple[int, int]] = {}
             new_objs: list = []
             new_count = 0
 
-            # ── YOLOv8 + ByteTrack ─────────────────────────────────────────
-            if model is not None:
+            # ── ROI crop (PicoDet only; speeds up inference by ~4×) ────────
+            roi_frame = frame
+            y_offset  = 0
+            if detector is not None and self.line:
+                line_ny   = (self.line.ny1 + self.line.ny2) / 2.0
+                margin_px = int(_ROI_MARGIN * h)
+                roi_y0 = max(0, int(line_ny * h) - margin_px)
+                roi_y1 = min(h, int(line_ny * h) + margin_px)
+                if roi_y1 - roi_y0 >= 64:          # sanity: at least 64 px tall
+                    roi_frame = frame[roi_y0:roi_y1, :]
+                    y_offset  = roi_y0
+
+            # ── PicoDet-M + BoxMot ByteTrack ───────────────────────────────
+            if detector is not None and tracker_bt is not None:
+                dets = detector.detect(roi_frame,
+                                       conf=_PICODET_CONF,
+                                       nms_iou=_PICODET_NMS_IOU)
+                # Restore full-frame y coordinates from ROI space
+                for d in dets:
+                    d["y1"] += y_offset
+                    d["y2"] += y_offset
+
+                if dets:
+                    dets_np = np.array(
+                        [[d["x1"], d["y1"], d["x2"], d["y2"], d["conf"], 0.0]
+                         for d in dets],
+                        dtype=np.float32,
+                    )
+                else:
+                    dets_np = np.empty((0, 6), dtype=np.float32)
+
+                tracks = tracker_bt.update(dets_np, frame)
+                new_count = len(tracks)
+
+                for t in tracks:
+                    x1, y1, x2, y2 = int(t[0]), int(t[1]), int(t[2]), int(t[3])
+                    tid    = int(t[4])
+                    conf_t = float(t[5]) if len(t) > 5 else 1.0
+                    cx     = (x1 + x2) // 2
+                    foot_y = y2          # foot anchor — more stable for crossing
+                    curr_centroids[tid] = (cx, foot_y)
+                    new_objs.append({
+                        "x1": x1, "y1": y1, "x2": x2, "y2": y2,
+                        "tid": tid, "conf": conf_t,
+                    })
+
+            # ── YOLO + built-in ByteTrack ──────────────────────────────────
+            elif model is not None:
                 results = model.track(
                     frame,
                     persist=_tracker_persist,
@@ -360,21 +461,22 @@ class _CameraWorker:
                     verbose=False,
                     tracker="bytetrack.yaml",
                 )
-                _tracker_persist = True  # re-enable after reset frame
+                _tracker_persist = True
                 boxes = results[0].boxes
                 if boxes is not None and boxes.id is not None:
                     new_count = len(boxes)
-                    for xyxy, tid, conf in zip(
+                    for xyxy, tid, conf_t in zip(
                         boxes.xyxy.cpu().numpy(),
                         boxes.id.cpu().numpy(),
                         boxes.conf.cpu().numpy(),
                     ):
                         track_id = int(tid)
                         x1, y1, x2, y2 = map(int, xyxy)
-                        curr_centroids[track_id] = ((x1 + x2) // 2, (y1 + y2) // 2)
+                        cx = (x1 + x2) // 2
+                        curr_centroids[track_id] = (cx, y2)   # foot anchor
                         new_objs.append({
                             "x1": x1, "y1": y1, "x2": x2, "y2": y2,
-                            "tid": track_id, "conf": float(conf),
+                            "tid": track_id, "conf": float(conf_t),
                         })
 
             # ── OpenCV HOG fallback ────────────────────────────────────────
@@ -394,49 +496,46 @@ class _CameraWorker:
                     hog_last_boxes = []
                     inv = 1.0 / det_scale
                     for i, (x, y, bw, bh) in enumerate(rects):
-                        conf = float(weights[i]) if len(weights) > i else 0.0
+                        c = float(weights[i]) if len(weights) > i else 0.0
                         hog_last_boxes.append((
                             int(x * inv), int(y * inv),
-                            int((x + bw) * inv), int((y + bh) * inv), conf,
+                            int((x + bw) * inv), int((y + bh) * inv), c,
                         ))
                 new_count = len(hog_last_boxes)
-                for i, (x1, y1, x2, y2, conf) in enumerate(hog_last_boxes):
+                for i, (x1, y1, x2, y2, conf_t) in enumerate(hog_last_boxes):
                     new_objs.append({
                         "x1": x1, "y1": y1, "x2": x2, "y2": y2,
-                        "tid": i, "conf": conf,
+                        "tid": i, "conf": conf_t,
                     })
-                    curr_centroids[i] = ((x1 + x2) // 2, (y1 + y2) // 2)
+                    curr_centroids[i] = ((x1 + x2) // 2, y2)  # foot anchor
 
-            # Update count AFTER inference — avoids API reading stale 0
             self.current_count = new_count
 
             with _objs_lock:
                 _objs[0] = new_objs
 
-            # ── Counting line ──────────────────────────────────────────────
+            # ── Dwell-confirmed counting line ──────────────────────────────
             if self.line:
                 lx1, ly1, lx2, ly2 = self.line.to_pixels(w, h)
-                for tid, centroid in curr_centroids.items():
-                    if tid not in self._prev_centroids or tid in self._counted_ids:
-                        continue
-                    direction = _check_line_cross(
-                        self._prev_centroids[tid], centroid,
+                for tid, foot in curr_centroids.items():
+                    direction = _update_crossing_state(
+                        self._cross_states, tid, foot,
                         lx1, ly1, lx2, ly2,
                     )
                     if direction == "in":
                         self.count_in += 1
-                        self._counted_ids.add(tid)
                         if self._on_event:
                             self._on_event(self.camera_id, tid, "in")
                     elif direction == "out":
                         self.count_out += 1
-                        self._counted_ids.add(tid)
                         if self._on_event:
                             self._on_event(self.camera_id, tid, "out")
 
-            self._prev_centroids = curr_centroids
+                # Purge states for tracks that have disappeared
+                for gone in set(self._cross_states) - set(curr_centroids):
+                    del self._cross_states[gone]
 
-            # ── FPS rolling average (tracks inference throughput) ──────────
+            # ── FPS rolling average ────────────────────────────────────────
             frame_count += 1
             elapsed = time.monotonic() - fps_t
             if elapsed >= 2.0:
@@ -450,32 +549,70 @@ class _CameraWorker:
 
 # ── Geometry helpers ───────────────────────────────────────────────────────
 
-def _check_line_cross(
-    prev: Tuple[int, int],
-    curr: Tuple[int, int],
+def _line_side(
+    px: int, py: int,
+    lx1: int, ly1: int,
+    lx2: int, ly2: int,
+) -> bool:
+    """
+    Cross-product side test.
+    Returns True if (px,py) is on the positive side of the directed line.
+    """
+    return float((lx2 - lx1) * (py - ly1) - (ly2 - ly1) * (px - lx1)) > 0.0
+
+
+def _update_crossing_state(
+    states: Dict,
+    tid: int,
+    foot: Tuple[int, int],          # (cx, y2) — foot-anchor point
     lx1: int, ly1: int,
     lx2: int, ly2: int,
 ) -> Optional[str]:
     """
-    Detect whether the movement prev→curr crosses the counting line.
+    Dwell-confirmed, stateful line crossing detector.
+
+    A crossing is only confirmed after the person's foot stays on the *new*
+    side for _CROSS_CONFIRM_FRAMES consecutive frames — eliminates false
+    counts from bounding-box jitter near the line.
+
     Returns 'in', 'out', or None.
-    Uses cross-product side test.
+    Modifies `states` in place.
     """
-    dlx = lx2 - lx1
-    dly = ly2 - ly1
+    px, py      = foot
+    curr_side   = _line_side(px, py, lx1, ly1, lx2, ly2)
 
-    def side(px: int, py: int) -> float:
-        return float(dlx * (py - ly1) - dly * (px - lx1))
-
-    s1 = side(*prev)
-    s2 = side(*curr)
-
-    if s1 == 0.0 or s2 == 0.0:
+    if tid not in states:
+        # First detection: record side, no crossing yet
+        states[tid] = {"side": curr_side, "candidate": None, "dwell": 0}
         return None
-    if (s1 > 0) == (s2 > 0):
-        return None  # same side — no crossing
 
-    return "in" if s1 > 0 else "out"
+    st = states[tid]
+
+    if curr_side == st["side"]:
+        # Still on the confirmed side — cancel any pending crossing
+        st["candidate"] = None
+        st["dwell"]     = 0
+        return None
+
+    # On the *opposite* side from confirmed
+    if st["candidate"] is None or st["candidate"] != curr_side:
+        # New candidate side — start dwell counter
+        st["candidate"] = curr_side
+        st["dwell"]     = 1
+        return None
+
+    st["dwell"] += 1
+
+    if st["dwell"] >= _CROSS_CONFIRM_FRAMES:
+        # Crossing confirmed — update state and fire event
+        old_side        = st["side"]
+        st["side"]      = curr_side
+        st["candidate"] = None
+        st["dwell"]     = 0
+        # Direction: "in" if was on positive side (moving toward negative side)
+        return "in" if old_side else "out"
+
+    return None
 
 
 def _draw_hud(

@@ -6,6 +6,11 @@ pydantic==2.9.2
 # ── YOLOv8 + ByteTrack (primary detection + tracking) ────────────────────
 ultralytics>=8.2.0
 
+# ── PP-PicoDet-M ONNX inference (faster CPU detector) ────────────────────
+onnxruntime>=1.16.0
+
+# (ByteTrack is implemented in crowd_engine/infra/bytetrack_lite.py — no extra dep)
+
 # ── OpenCV and related image processing (legacy / fallback provider) ──────
 opencv-python-headless==4.8.1.78
 imutils==0.5.4

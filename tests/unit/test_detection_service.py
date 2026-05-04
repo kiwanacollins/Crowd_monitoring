@@ -12,42 +12,65 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 
-# ── _check_line_cross geometry ─────────────────────────────────────────────
+# ── _update_crossing_state geometry ───────────────────────────────────────
 
 class TestCheckLineCross:
-    """Tests for the _check_line_cross helper function."""
+    """Tests for the dwell-confirmed crossing logic (replaces _check_line_cross)."""
 
-    def _cross(self, prev, curr, lx1=0, ly1=240, lx2=640, ly2=240):
-        from crowd_engine.services.detection_service import _check_line_cross
-        return _check_line_cross(prev, curr, lx1, ly1, lx2, ly2)
+    def _cross_sequence(self, positions, lx1=0, ly1=240, lx2=640, ly2=240):
+        """Walk a track through a sequence of foot positions and collect events."""
+        from crowd_engine.services.detection_service import _update_crossing_state
+        states: dict = {}
+        events = []
+        for i, (px, py) in enumerate(positions):
+            r = _update_crossing_state(states, 1, (px, py), lx1, ly1, lx2, ly2)
+            if r:
+                events.append(r)
+        return events
 
     def test_top_to_bottom_is_out(self):
-        # prev is above the horizontal line (y<240), curr is below (y>240)
-        result = self._cross(prev=(320, 100), curr=(320, 350))
-        assert result == "out"
+        # Walk from above (y=100) to clearly below (y=350) over several frames
+        # Dwell requires 3 consecutive frames on new side before confirming
+        positions = [(320, 100), (320, 150), (320, 200),
+                     (320, 250), (320, 280), (320, 350)]
+        events = self._cross_sequence(positions)
+        assert "out" in events
+        assert "in" not in events
 
     def test_bottom_to_top_is_in(self):
-        result = self._cross(prev=(320, 350), curr=(320, 100))
-        assert result == "in"
+        positions = [(320, 350), (320, 300), (320, 260),
+                     (320, 220), (320, 180), (320, 100)]
+        events = self._cross_sequence(positions)
+        assert "in" in events
+        assert "out" not in events
 
     def test_no_crossing_same_side(self):
-        # Both points above the line
-        result = self._cross(prev=(320, 100), curr=(320, 200))
-        assert result is None
+        # Both points above the line — no crossing
+        positions = [(320, 100), (320, 150), (320, 200)]
+        events = self._cross_sequence(positions)
+        assert events == []
 
     def test_vertical_line_crossing(self):
-        # Vertical line at x=320
-        from crowd_engine.services.detection_service import _check_line_cross
-        result = _check_line_cross(
-            prev=(100, 240), curr=(500, 240),
-            lx1=320, ly1=0, lx2=320, ly2=480
-        )
-        assert result in ("in", "out")
+        # Vertical line at x=320; walk left→right
+        from crowd_engine.services.detection_service import _update_crossing_state
+        states: dict = {}
+        events = []
+        for x in [100, 150, 200, 250, 320, 380, 420, 460]:
+            r = _update_crossing_state(states, 1, (x, 240), 320, 0, 320, 480)
+            if r:
+                events.append(r)
+        assert len(events) == 1
+        assert events[0] in ("in", "out")
 
-    def test_point_on_line_returns_none(self):
-        # prev exactly on the line → side == 0
-        result = self._cross(prev=(320, 240), curr=(320, 350))
-        assert result is None
+    def test_jitter_does_not_double_count(self):
+        # Oscillate right at the line — should count at most once per side
+        positions = (
+            [(320, 100)] * 5         # start firmly above
+            + [(320, 250), (320, 230), (320, 250), (320, 230), (320, 250)]  # jitter
+            + [(320, 260), (320, 270), (320, 280)]   # settle below
+        )
+        events = self._cross_sequence(positions)
+        assert events.count("out") <= 1    # no double-counting
 
 
 # ── CameraStats ────────────────────────────────────────────────────────────
@@ -72,11 +95,11 @@ class TestCameraWorkerReset:
         )
         worker.count_in = 10
         worker.count_out = 5
-        worker._counted_ids = {1, 2, 3}
+        worker._cross_states = {1: {"side": True, "candidate": None, "dwell": 0}}
         worker.reset_counts()
         assert worker.count_in == 0
         assert worker.count_out == 0
-        assert len(worker._counted_ids) == 0
+        assert len(worker._cross_states) == 0
 
 
 # ── DetectionService (no real cameras) ────────────────────────────────────
