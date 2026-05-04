@@ -396,3 +396,11 @@ The original `detection.py` is preserved unchanged. The OpenCV MobileNetSSD logi
 - **CORS:** Configured for `*` in dev. Restrict `allow_origins` in production.
 - **Rate limiting:** 60 req/min per IP by default. Tune `RATE_LIMIT_PER_MINUTE`.
 - **Security headers:** `X-Content-Type-Options`, `X-Frame-Options`, `Strict-Transport-Security` set on all API responses.
+
+
+
+
+
+
+
+ source /Users/kiwana/projects/Crowd_monitoring/.venv-1/bin/activate

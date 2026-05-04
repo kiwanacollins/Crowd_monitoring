@@ -1,0 +1,24 @@
+INFO:     Started server process [36716]
+INFO:     Waiting for application startup.
+2026-05-04T15:21:58 [INFO] crowd_engine.api_server [corr=-] Starting Crowd Monitoring API
+2026-05-04T15:21:58 [WARNING] crowd_engine.providers.yolo_provider [corr=-] ultralytics not installed — YOLOv8 provider disabled
+2026-05-04T15:21:58 [INFO] crowd_engine.services.factory [corr=-] Registered provider: yolov8
+2026-05-04T15:21:59 [INFO] crowd_engine.services.factory [corr=-] Registered provider: roboflow
+2026-05-04T15:21:59 [INFO] crowd_engine.providers.opencv_provider [corr=-] OpenCV MobileNetSSD loaded successfully
+2026-05-04T15:21:59 [INFO] crowd_engine.services.factory [corr=-] Registered provider: opencv
+2026-05-04T15:21:59 [WARNING] crowd_engine.providers.yolo_provider [corr=-] ultralytics not installed — YOLOv8 provider disabled
+2026-05-04T15:21:59 [INFO] crowd_engine.services.factory [corr=-] Registered provider: yolov8
+2026-05-04T15:21:59 [INFO] crowd_engine.services.factory [corr=-] Registered provider: roboflow
+2026-05-04T15:21:59 [INFO] crowd_engine.providers.opencv_provider [corr=-] OpenCV MobileNetSSD loaded successfully
+2026-05-04T15:21:59 [INFO] crowd_engine.services.factory [corr=-] Registered provider: opencv
+2026-05-04T15:21:59 [WARNING] crowd_engine.services.detection_service [corr=-] Camera kiu-webcam falling back to OpenCV HOG detector (YOLO unavailable: No module named 'ultralytics')
+2026-05-04T15:21:59 [INFO] crowd_engine.services.detection_service [corr=-] Started camera kiu-webcam (0)
+2026-05-04T15:21:59 [WARNING] crowd_engine.services.detection_service [corr=-] Camera kiu-main-entrance falling back to OpenCV HOG detector (YOLO unavailable: No module named 'ultralytics')
+2026-05-04T15:21:59 [INFO] crowd_engine.services.detection_service [corr=-] Started camera kiu-main-entrance (crowd.mp4)
+2026-05-04T15:21:59 [WARNING] crowd_engine.services.detection_service [corr=-] Camera kiu-library falling back to OpenCV HOG detector (YOLO unavailable: No module named 'ultralytics')
+2026-05-04T15:21:59 [INFO] crowd_engine.services.detection_service [corr=-] Started camera kiu-library (crowd2.mp4)
+INFO:     Application startup complete.
+ERROR:    [Errno 1] error while attempting to bind on address ('127.0.0.1', 8000): operation not permitted
+INFO:     Waiting for application shutdown.
+2026-05-04T15:21:59 [INFO] crowd_engine.api_server [corr=-] Shutting down Crowd Monitoring API
+INFO:     Application shutdown complete.
