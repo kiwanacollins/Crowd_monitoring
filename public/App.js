@@ -226,11 +226,11 @@ async function fetchCrowdData() {
       apiFetch(`${PYTHON_API}/api/v1/cameras`).catch(() => []),
     ]);
 
-    const totalIn       = metrics ? (metrics.total_in       || 0) : 0;
-    const netOccupancy  = metrics ? (metrics.net_occupancy  || 0) : 0;
-    const activeCameras = metrics ? (metrics.cameras_active || cameras.length || 0) : cameras.length;
-    const avgFps        = metrics ? (metrics.avg_fps        || 0) : 0;
-    const totalEvents   = metrics ? (metrics.events_logged  || 0) : 0;
+    const totalIn       = metrics?.total_in       ?? 0;
+    const netOccupancy  = metrics?.net_occupancy  ?? 0;
+    const activeCameras = metrics?.cameras_active ?? cameras.length;
+    const avgFps        = metrics?.avg_fps        ?? 0;
+    const totalEvents   = metrics?.events_logged  ?? 0;
     const now = new Date().toLocaleTimeString();
 
     // Overview KPI cards
@@ -253,7 +253,7 @@ async function fetchCrowdData() {
     }
 
     // Push to charts
-    const totalOut = metrics ? (metrics.total_out || 0) : 0;
+    const totalOut = metrics?.total_out ?? 0;
     pushToChart(ovPeakChart,     now, [totalIn]);
     pushToChart(ovAvgChart,      now, [totalOut]);
     pushToChart(ovForecastChart, now, [netOccupancy]);
