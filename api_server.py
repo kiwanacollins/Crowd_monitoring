@@ -132,9 +132,16 @@ async def add_correlation_id(request: Request, call_next):
 async def rate_limit_middleware(request: Request, call_next):
     ip = request.client.host if request.client else "unknown"
     if not _check_rate_limit(ip):
+        retry_after = _RATE_WINDOW
+        headers = {
+            "Retry-After": str(retry_after),
+            "X-RateLimit-Limit": str(settings.rate_limit_per_minute),
+            "X-RateLimit-Window": str(_RATE_WINDOW),
+        }
         return JSONResponse(
             status_code=429,
-            content={"error": "Rate limit exceeded", "retry_after_seconds": _RATE_WINDOW},
+            content={"error": "Rate limit exceeded", "retry_after_seconds": retry_after},
+            headers=headers,
         )
     return await call_next(request)
 

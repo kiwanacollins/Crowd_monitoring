@@ -166,7 +166,7 @@ Copy `.env.example` to `.env`. **Never commit `.env` to version control.**
 | `CIRCUIT_BREAKER_RESET_SECONDS` | `60` | Auto-reset after N seconds |
 | `LOG_LEVEL` | `INFO` | DEBUG / INFO / WARNING / ERROR |
 | `LOG_JSON` | `false` | true = JSON-line logs (production) |
-| `RATE_LIMIT_PER_MINUTE` | `60` | API rate limit per IP |
+| `RATE_LIMIT_PER_MINUTE` | `300` | API rate limit per IP |
 | `DOCKER_PROVIDER_CHAIN` | `roboflow,geospatial,opencv` | Optional Docker-only provider order override |
 
 ---
@@ -394,7 +394,7 @@ The original `detection.py` is preserved unchanged. The OpenCV MobileNetSSD logi
 - **Passwords:** Currently stored in plain text — add bcrypt hashing before production.
 - **API keys:** Store in `.env` or a secrets manager. Never commit to source control.
 - **CORS:** Configured for `*` in dev. Restrict `allow_origins` in production.
-- **Rate limiting:** 60 req/min per IP by default. Tune `RATE_LIMIT_PER_MINUTE`.
+- **Rate limiting:** 300 req/min per IP by default. Tune `RATE_LIMIT_PER_MINUTE`.
 - **Security headers:** `X-Content-Type-Options`, `X-Frame-Options`, `Strict-Transport-Security` set on all API responses.
 
 
