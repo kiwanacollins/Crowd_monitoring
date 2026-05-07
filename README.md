@@ -404,3 +404,5 @@ The original `detection.py` is preserved unchanged. The OpenCV MobileNetSSD logi
 
 
  source /Users/kiwana/projects/Crowd_monitoring/.venv-1/bin/activate
+
+ /Users/kiwana/projects/Crowd_monitoring/.venv-1/bin/python -m uvicorn api_server:app --host 0.0.0.0 --port 8000
