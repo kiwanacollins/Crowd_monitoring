@@ -24,8 +24,13 @@ function cameraLabel(id) {
 }
 
 // ── Chart.js defaults ────────────────────────────────────────
-Chart.defaults.color = '#94a3b8';
-Chart.defaults.borderColor = '#2e3347';
+function getThemeColor(cssVarName, fallback) {
+  const value = getComputedStyle(document.documentElement).getPropertyValue(cssVarName).trim();
+  return value || fallback;
+}
+
+Chart.defaults.color = getThemeColor('--muted', '#64748b');
+Chart.defaults.borderColor = getThemeColor('--border', '#e2e8f0');
 Chart.defaults.font.family = 'Inter, sans-serif';
 Chart.defaults.plugins.legend.display = false;
 
@@ -194,7 +199,7 @@ function updateMapMarkers(cameras) {
         <span style="margin-left:6px;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;
           background:${color}22;color:${color}">${lbl}</span><br/>
         IN: ${cam.count_in || 0} &nbsp; OUT: ${cam.count_out || 0}<br/>
-        <span style="font-size:11px;color:#94a3b8">FPS: ${(cam.fps || 0).toFixed(1)}</span>
+        <span style="font-size:11px;color:var(--muted)">FPS: ${(cam.fps || 0).toFixed(1)}</span>
       </div>`;
 
     if (!mapMarkers[key]) {
@@ -682,7 +687,7 @@ async function loadCompareChart() {
           responsive: true,
           maintainAspectRatio: false,
           scales: { y: { beginAtZero: true } },
-          plugins: { legend: { display: true, labels: { color: '#e2e8f0' } } },
+          plugins: { legend: { display: true, labels: { color: getThemeColor('--text', '#0f172a') } } },
         },
       });
     }
