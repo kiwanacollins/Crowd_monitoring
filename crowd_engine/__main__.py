@@ -57,6 +57,8 @@ def _send_to_node(data: dict) -> None:
 def process_camera_loop(cam_config: dict, orchestrator: Any, run_once: bool = False) -> None:
     set_correlation_id()
     source = cam_config.get("source", 0)
+    if isinstance(source, str) and source.isdigit():
+        source = int(source)
     lat = cam_config.get("coordinates", {}).get("latitude", 0.0)
     lng = cam_config.get("coordinates", {}).get("longitude", 0.0)
     label = cam_config.get("label", str(source))

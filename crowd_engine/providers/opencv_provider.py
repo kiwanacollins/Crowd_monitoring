@@ -68,7 +68,8 @@ class OpenCVProvider:
             if isinstance(source, np.ndarray):
                 frame = source
             else:
-                cap = cv2.VideoCapture(source)
+                src = int(source) if isinstance(source, str) and source.isdigit() else source
+                cap = cv2.VideoCapture(src)
                 if not cap.isOpened():
                     return CrowdEstimate.error_result(
                         self.name(), camera_input, f"Cannot open source: {source}"

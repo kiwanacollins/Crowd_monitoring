@@ -7,6 +7,8 @@ downloading weights.
 
 from __future__ import annotations
 
+import sys
+import types
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -42,13 +44,21 @@ def _make_mock_results(num_people: int, classes: list[int] | None = None):
 
 def _make_provider():
     """Return a YOLOv8Provider with YOLO model mocked so no weights download."""
-    with patch("ultralytics.YOLO") as MockYOLO:
-        mock_model = MagicMock()
-        # Warm-up call during _init_model should not raise
-        mock_model.return_value = _make_mock_results(0)
-        MockYOLO.return_value = mock_model
+    # Ultralytics transitively imports torch; on some Python versions (e.g. 3.13)
+    # torch wheels may be unavailable. To keep these unit tests lightweight and
+    # deterministic, inject a fake `ultralytics` module.
+    mock_model = MagicMock()
+    mock_model.return_value = _make_mock_results(0)  # warm-up call should not raise
+
+    mock_yolo_ctor = MagicMock(return_value=mock_model)
+    fake_ultralytics = types.ModuleType("ultralytics")
+    fake_ultralytics.YOLO = mock_yolo_ctor
+
+    with patch.dict(sys.modules, {"ultralytics": fake_ultralytics}):
         from crowd_engine.providers.yolo_provider import YOLOv8Provider
+
         provider = YOLOv8Provider(model_name="yolov8n.pt")
+
     return provider, mock_model
 
 

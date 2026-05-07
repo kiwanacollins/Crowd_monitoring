@@ -14,6 +14,17 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 
 
+# Load local .env file (if present) so running `python -m crowd_engine` or
+# `uvicorn api_server:app` picks up configuration without Docker.
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv()
+except Exception:
+    # Optional: allow running even if python-dotenv isn't installed.
+    pass
+
+
 def _env(key: str, default: str = "") -> str:
     return os.environ.get(key, default).strip()
 

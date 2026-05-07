@@ -112,7 +112,16 @@ class YOLOv8Provider:
             self._model(dummy, classes=[0], verbose=False)
             self._available = True
             log.info("YOLOv8 model loaded: %s", self._model_name)
+        except ModuleNotFoundError as exc:
+            missing = getattr(exc, "name", None) or "dependency"
+            if missing == "torch":
+                log.warning("torch not installed — YOLOv8 provider disabled")
+            elif missing == "ultralytics":
+                log.warning("ultralytics not installed — YOLOv8 provider disabled")
+            else:
+                log.warning("Missing %s — YOLOv8 provider disabled", missing)
         except ImportError:
-            log.warning("ultralytics not installed — YOLOv8 provider disabled")
+            # Fallback for non-module import errors
+            log.warning("ultralytics dependencies missing — YOLOv8 provider disabled")
         except Exception as exc:
             log.warning("Failed to load YOLOv8 model: %s", exc)
