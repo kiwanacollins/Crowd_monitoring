@@ -400,9 +400,13 @@ The original `detection.py` is preserved unchanged. The OpenCV MobileNetSSD logi
 
 
 
+brew services start mongodb-community
+mongod --config /usr/local/etc/mongod.conf
+npm run start-node
 
 
+pip install uvicorn  # if not already installed
+uvicorn api_server:app --reload --port 8000
 
- source /Users/kiwana/projects/Crowd_monitoring/.venv-1/bin/activate
 
- /Users/kiwana/projects/Crowd_monitoring/.venv-1/bin/python -m uvicorn api_server:app --host 0.0.0.0 --port 8000
+python -m crowd_engine --cameras cameras.json
